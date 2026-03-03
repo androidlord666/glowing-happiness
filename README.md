@@ -1,32 +1,56 @@
 # stakeNbake
 
-Solana Mobile dApp focused on consolidating stake accounts (up to 25 source stake accounts into 1 destination stake account) with a minimalist dark Solana-themed UI.
+Solana Mobile dApp for consolidating stake accounts (up to 25 source stake accounts into 1 destination stake account), with a minimalist dark Solana-themed UI.
 
-## MVP features
-- Solana dark minimalist mobile UI
-- Wallet connect/disconnect integration surface (mock adapter currently wired)
-- Send flow (build transfer tx + sign/send via wallet adapter)
-- Receive flow (opens explorer address link)
-- Stake account discovery + selection (up to 25)
-- Consolidation tx builder (delegate destination + merge selected source stake accounts)
-- Validator vote account preset for Solana Mobile staking validator
-- Status pipeline + tx explorer links
+## Project layout
 
-## Tech
-- React Native (TypeScript)
-- Solana Mobile Wallet Adapter + `@solana/web3.js`
+- `StakeNBakeMobile/` → React Native Android/iOS app (main app)
+- root files are legacy scaffold notes from earlier MVP pass
 
-## Quick start
+## Current shipped features
+
+- Dark Solana-inspired mobile UI
+- Wallet connect/disconnect adapter layer (currently mock adapter; MWA swap-in point ready)
+- Send flow (build transfer tx + sign/send via wallet adapter interface)
+- Receive flow (open wallet address in Solana explorer)
+- Stake account discovery
+- Select up to 25 source stake accounts
+- Consolidation transaction builder:
+  - delegate destination to validator vote account
+  - merge selected source stake accounts into destination
+- Default validator vote account set to:
+  - `SKRuTecmFDZHjs2DxRTJNEK7m7hunKGTWJiaZ3tMVVA`
+
+## Run app
+
 ```bash
+cd StakeNBakeMobile
 npm install
-npm run start
+npm run android
 ```
 
-## Notes
-This repo currently targets devnet first. Mainnet-beta can be enabled by changing RPC + cluster config.
+## Build APK
 
-## Remaining for production
-- Replace `MockWalletAdapter` in `src/lib/mwa.ts` with full Solana Mobile Wallet Adapter authorization + sign/send implementation.
-- Add full React Native Android project scaffold (if starting from scratch) and configure release signing.
-- Run on physical Solana Mobile device and verify stake merge constraints against real account states.
-- Prepare dApp Store listing assets and policy text.
+See:
+- `StakeNBakeMobile/BUILD_ANDROID.md`
+
+Quick release command:
+
+```bash
+cd StakeNBakeMobile/android
+./gradlew assembleRelease
+```
+
+Expected APK:
+- `StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk`
+
+## Final production tasks remaining
+
+1. Replace `MockWalletAdapter` in `StakeNBakeMobile/src/lib/mwa.ts` with full Solana Mobile Wallet Adapter implementation.
+2. Configure Android signing keystore for release signing.
+3. Validate stake merge constraints on-device against real stake account states.
+4. Add dApp Store listing assets (icon/screenshots/copy/privacy text).
+
+## Security note
+
+Any tokens pasted in chat should be rotated after use.
