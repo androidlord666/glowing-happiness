@@ -8,14 +8,20 @@ export type StakeAccountInfo = {
   lamports: number;
 };
 
+function isOwnedBy(wallet: string, parsed: any): boolean {
+  const staker = parsed?.info?.meta?.authorized?.staker;
+  const withdrawer = parsed?.info?.meta?.authorized?.withdrawer;
+  return staker === wallet || withdrawer === wallet;
+}
+
 export async function fetchStakeAccounts(owner: string): Promise<StakeAccountInfo[]> {
-  const ownerKey = new PublicKey(owner);
+  const ownerKey = new PublicKey(owner).toBase58();
   const accounts = await connection.getParsedProgramAccounts(
-    new PublicKey('Stake11111111111111111111111111111111111111'),
-    {
-      filters: [{ memcmp: { offset: 44, bytes: ownerKey.toBase58() } }]
-    }
+    new PublicKey('Stake11111111111111111111111111111111111111')
   );
 
-  return accounts.map((a) => ({ pubkey: a.pubkey.toBase58(), lamports: a.account.lamports }));
+  return accounts
+    .filter((a: any) => a.account?.data?.parsed?.type === 'delegated' || a.account?.data?.parsed?.type === 'initialized')
+    .filter((a: any) => isOwnedBy(ownerKey, a.account?.data?.parsed))
+    .map((a) => ({ pubkey: a.pubkey.toBase58(), lamports: a.account.lamports }));
 }

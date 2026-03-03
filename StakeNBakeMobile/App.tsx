@@ -9,6 +9,8 @@ import {
   TextInput,
   View
 } from 'react-native';
+import Clipboard from '@react-native-clipboard/clipboard';
+import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { connection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
@@ -44,12 +46,13 @@ export default function App() {
   const [createStakeSol, setCreateStakeSol] = useState('0.1');
   const [sendTo, setSendTo] = useState('');
   const [sendSol, setSendSol] = useState('0.01');
+  const [showQr, setShowQr] = useState(false);
   const [lastSignature, setLastSignature] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
 
   useEffect(() => {
-    const t = setTimeout(() => setScreen('landing'), 1600);
+    const t = setTimeout(() => setScreen('landing'), 1200);
     return () => clearTimeout(t);
   }, []);
 
@@ -62,7 +65,8 @@ export default function App() {
       const session = await walletAdapter.connect();
       setWallet(session.address);
       setScreen('app');
-      setStatus('Wallet connected. Stake tab is ready.');
+      setStatus('Wallet connected.');
+      await loadStakeAccounts(session.address);
     } catch (e: any) {
       setStatus(`Connect error: ${e?.message ?? 'unknown error'}`);
     } finally {
@@ -80,17 +84,18 @@ export default function App() {
     setScreen('landing');
   };
 
-  const loadStakeAccounts = async () => {
+  const loadStakeAccounts = async (walletOverride?: string) => {
     try {
-      if (!wallet) throw new Error('Connect wallet first');
+      const activeWallet = walletOverride ?? wallet;
+      if (!activeWallet) throw new Error('Connect wallet first');
       setBusy(true);
       setStatus('Refreshing stake accounts...');
-      const items = await fetchStakeAccounts(wallet);
+      const items = await fetchStakeAccounts(activeWallet);
       setStakeAccounts(items);
       if (!destination && items[0]) setDestination(items[0].pubkey);
-      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts found yet. Use Create + Stake first.');
-    } catch {
-      setStatus('Could not refresh stake accounts right now. Please retry.');
+      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
+    } catch (e: any) {
+      setStatus(`Refresh failed: ${e?.message ?? 'Please retry'}`);
     } finally {
       setBusy(false);
     }
@@ -99,6 +104,14 @@ export default function App() {
   const onCreateStake = async () => {
     try {
       if (!wallet) throw new Error('Wallet not connected');
+      const amount = Number(createStakeSol);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter valid SOL amount');
+
+      const balLamports = await connection.getBalance(asPublicKey(wallet));
+      if (balLamports < Math.round(amount * LAMPORTS_PER_SOL)) {
+        throw new Error('Insufficient balance for staking amount');
+      }
+
       setBusy(true);
       setStatus('Creating and delegating stake account...');
 
@@ -126,7 +139,7 @@ export default function App() {
   const onUnstake = async () => {
     try {
       if (!wallet) throw new Error('Wallet not connected');
-      if (!destination) throw new Error('Set/select a stake account first');
+      if (!destination) throw new Error('Select a stake account first');
       setBusy(true);
       setStatus('Submitting unstake (deactivate) transaction...');
 
@@ -137,7 +150,7 @@ export default function App() {
       });
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)} (deactivation epoch rules apply).`);
+      setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}.`);
     } catch (e: any) {
       setStatus(`Unstake error: ${e?.message ?? 'unknown error'}`);
     } finally {
@@ -148,11 +161,11 @@ export default function App() {
   const onConsolidate = async () => {
     try {
       if (!wallet) throw new Error('Wallet not connected');
-      if (!destination) throw new Error('Choose destination stake account');
+      if (!destination) throw new Error('Select destination stake account from list below');
 
       const sources = selectedKeys.filter((k) => k !== destination).map(asPublicKey);
-      if (sources.length === 0) throw new Error('Select at least one source account (not destination)');
-      if (sources.length > 25) throw new Error('Max 25 source accounts');
+      if (sources.length === 0) throw new Error('Select source stake account(s) below');
+      if (sources.length > 25) throw new Error('Max 25 source stake accounts');
 
       setBusy(true);
       setStatus('Building consolidation transactions...');
@@ -179,6 +192,8 @@ export default function App() {
   const onSend = async () => {
     try {
       if (!wallet) throw new Error('Connect wallet first');
+      if (!sendTo.trim()) throw new Error('Enter recipient address or .sol name');
+
       const recipient = await resolveRecipientAddress(sendTo, connection);
       const lamports = Math.round(Number(sendSol) * LAMPORTS_PER_SOL);
       if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('Invalid SOL amount');
@@ -202,14 +217,10 @@ export default function App() {
     }
   };
 
-  const onReceive = async () => {
-    try {
-      if (!wallet) throw new Error('Connect wallet first');
-      await Linking.openURL(addressExplorerUrl(wallet, CLUSTER));
-      setStatus('Opened wallet receive address.');
-    } catch (e: any) {
-      setStatus(`Receive error: ${e?.message ?? 'unknown error'}`);
-    }
+  const copyWalletAddress = () => {
+    if (!wallet) return;
+    Clipboard.setString(wallet);
+    setStatus('Wallet address copied to clipboard.');
   };
 
   if (screen === 'splash') {
@@ -276,6 +287,7 @@ export default function App() {
             </View>
 
             <Text style={styles.label}>Consolidate existing stake accounts</Text>
+            <Text style={styles.meta}>Pick destination and source accounts from the list below (same connected wallet authority).</Text>
             <TextInput
               style={styles.input}
               placeholder="Destination stake account"
@@ -285,7 +297,7 @@ export default function App() {
               autoCapitalize="none"
             />
             <View style={styles.row}>
-              <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={loadStakeAccounts} />
+              <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={() => loadStakeAccounts()} />
               <ActionButton label={busy ? 'Consolidating…' : 'Consolidate'} onPress={onConsolidate} />
             </View>
 
@@ -338,8 +350,17 @@ export default function App() {
         {mode === 'receive' && (
           <View style={styles.card}>
             <Text style={styles.label}>Receive</Text>
-            <Text style={styles.meta}>Open wallet address in explorer and share/copy there.</Text>
-            <ActionButton label="Open Receive Address" onPress={onReceive} />
+            <View style={styles.row}>
+              <ActionButton label="Copy Address" onPress={copyWalletAddress} />
+              <ActionButton label={showQr ? 'Hide QR' : 'Show QR'} onPress={() => setShowQr((v) => !v)} />
+            </View>
+            <Text style={styles.meta}>{wallet}</Text>
+            {showQr && (
+              <View style={styles.qrWrap}>
+                <QRCode value={wallet} size={180} backgroundColor={colors.panel} color={colors.text} />
+              </View>
+            )}
+            <ActionButton label="Open in Explorer" onPress={() => Linking.openURL(addressExplorerUrl(wallet, CLUSTER))} />
           </View>
         )}
 
@@ -400,6 +421,7 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
+  qrWrap: { alignItems: 'center', marginVertical: 8 },
   meta: { color: colors.muted },
   account: { color: colors.text, paddingVertical: 6 },
   accountSelected: { color: colors.primary },
