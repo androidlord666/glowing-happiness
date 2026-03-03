@@ -22,7 +22,7 @@ jobs:
           cache-dependency-path: StakeNBakeMobile/package-lock.json
 
       - name: Install JS deps
-        run: npm ci
+        run: npm install
 
       - name: Setup Java
         uses: actions/setup-java@v4
