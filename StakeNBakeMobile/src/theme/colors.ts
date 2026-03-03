@@ -1,10 +1,10 @@
 export const colors = {
-  bg: '#0B0B10',
-  panel: '#12121A',
-  text: '#F6F6FF',
-  muted: '#A1A1B8',
+  bg: '#080A12',
+  panel: '#101523',
+  text: '#F6F9FF',
+  muted: '#99A3C0',
   primary: '#14F195',
   secondary: '#9945FF',
   danger: '#FF5A7A',
-  border: '#212131'
+  border: '#253050'
 };

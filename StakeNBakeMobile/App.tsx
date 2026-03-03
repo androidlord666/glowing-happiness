@@ -18,11 +18,20 @@ import { colors } from './src/theme/colors';
 import { CLUSTER, DEFAULT_VALIDATOR_VOTE } from './src/config';
 import { txExplorerUrl, addressExplorerUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
+import { resolveRecipientAddress } from './src/lib/sns';
 
 const walletAdapter = createWalletAdapter();
 
+type Mode = 'stake' | 'send' | 'receive';
+
+function shortAddr(v: string) {
+  if (!v) return '';
+  return `${v.slice(0, 6)}...${v.slice(-6)}`;
+}
+
 export default function App() {
   const [wallet, setWallet] = useState<string>('');
+  const [mode, setMode] = useState<Mode>('stake');
   const [stakeAccounts, setStakeAccounts] = useState<StakeAccountInfo[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [destination, setDestination] = useState<string>('');
@@ -30,6 +39,7 @@ export default function App() {
   const [sendTo, setSendTo] = useState('');
   const [sendSol, setSendSol] = useState('0.01');
   const [lastSignature, setLastSignature] = useState('');
+  const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
 
   const selectedKeys = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
@@ -37,11 +47,14 @@ export default function App() {
 
   const connectWallet = async () => {
     try {
+      setBusy(true);
       const session = await walletAdapter.connect();
       setWallet(session.address);
-      setStatus('Wallet connected');
+      setStatus('Wallet connected. Ready to stake.');
     } catch (e: any) {
       setStatus(`Connect error: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -57,13 +70,16 @@ export default function App() {
   const loadStakeAccounts = async () => {
     try {
       if (!wallet) throw new Error('Connect wallet first');
-      setStatus('Loading stake accounts...');
+      setBusy(true);
+      setStatus('Refreshing stake accounts...');
       const items = await fetchStakeAccounts(wallet);
       setStakeAccounts(items);
       if (!destination && items[0]) setDestination(items[0].pubkey);
-      setStatus(`Loaded ${items.length} stake account(s)`);
-    } catch (e: any) {
-      setStatus(`Error: ${e?.message ?? 'Failed to load accounts'}`);
+      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts found yet. Create/delegate one first.');
+    } catch {
+      setStatus('Could not refresh stake accounts right now. Please retry.');
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -73,10 +89,11 @@ export default function App() {
       if (!destination) throw new Error('Choose destination stake account');
 
       const sources = selectedKeys.filter((k) => k !== destination).map(asPublicKey);
-      if (sources.length === 0) throw new Error('Select at least one source (different from destination)');
+      if (sources.length === 0) throw new Error('Select at least one source account (not destination)');
       if (sources.length > 25) throw new Error('Max 25 source accounts');
 
-      setStatus('Building consolidation transactions...');
+      setBusy(true);
+      setStatus('Building stake consolidation transactions...');
       const txs = await buildConsolidationTransactions({
         connection,
         owner: asPublicKey(wallet),
@@ -87,35 +104,40 @@ export default function App() {
         },
       });
 
-      setStatus(`Signing ${txs.length} tx(s)...`);
+      setStatus(`Signing ${txs.length} stake tx(s)...`);
       const sigs = await walletAdapter.signAndSendTransactions(txs);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`Submitted ${sigs.length} tx(s)`);
+      setStatus(`Stake consolidation submitted (${sigs.length} tx)`);
     } catch (e: any) {
-      setStatus(`Consolidation error: ${e?.message ?? 'unknown error'}`);
+      setStatus(`Stake error: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      setBusy(false);
     }
   };
 
   const onSend = async () => {
     try {
       if (!wallet) throw new Error('Connect wallet first');
-      if (!sendTo) throw new Error('Recipient required');
+      const recipient = await resolveRecipientAddress(sendTo, connection);
       const lamports = Math.round(Number(sendSol) * LAMPORTS_PER_SOL);
       if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('Invalid SOL amount');
 
+      setBusy(true);
       setStatus('Building transfer transaction...');
       const tx = await buildTransferTx({
         connection,
         from: asPublicKey(wallet),
-        to: asPublicKey(sendTo),
+        to: asPublicKey(recipient),
         lamports,
       });
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`Transfer submitted${sigs[0] ? `: ${sigs[0]}` : ''}`);
+      setStatus(`Transfer submitted to ${recipient}`);
     } catch (e: any) {
       setStatus(`Send error: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      setBusy(false);
     }
   };
 
@@ -123,7 +145,7 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Connect wallet first');
       await Linking.openURL(addressExplorerUrl(wallet, CLUSTER));
-      setStatus('Opened receive address in explorer');
+      setStatus('Opened wallet receive address');
     } catch (e: any) {
       setStatus(`Receive error: ${e?.message ?? 'unknown error'}`);
     }
@@ -134,91 +156,104 @@ export default function App() {
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Consolidate up to 25 stake accounts into 1 · {CLUSTER}</Text>
+        <Text style={styles.subtitle}>Solana Mobile staking for {shortAddr(DEFAULT_VALIDATOR_VOTE)} · {CLUSTER}</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Wallet</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Wallet pubkey"
-            placeholderTextColor={colors.muted}
-            value={wallet}
-            onChangeText={setWallet}
-            autoCapitalize="none"
-          />
-          <View style={styles.row}>
-            <ActionButton label="Connect" onPress={connectWallet} />
-            <ActionButton label="Disconnect" onPress={disconnectWallet} />
-          </View>
+          {!wallet ? (
+            <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
+          ) : (
+            <View style={styles.walletBox}>
+              <Text style={styles.walletText}>{shortAddr(wallet)}</Text>
+              <ActionButton label="Disconnect" onPress={disconnectWallet} />
+            </View>
+          )}
 
-          <Text style={styles.label}>Send</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Recipient pubkey"
-            placeholderTextColor={colors.muted}
-            value={sendTo}
-            onChangeText={setSendTo}
-            autoCapitalize="none"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Amount SOL"
-            placeholderTextColor={colors.muted}
-            value={sendSol}
-            onChangeText={setSendSol}
-            keyboardType="decimal-pad"
-          />
           <View style={styles.row}>
-            <ActionButton label="Send" onPress={onSend} />
-            <ActionButton label="Receive" onPress={onReceive} />
+            <ActionButton label="Stake" onPress={() => setMode('stake')} />
+            <ActionButton label="Send" onPress={() => setMode('send')} />
+            <ActionButton label="Receive" onPress={() => setMode('receive')} />
           </View>
         </View>
 
-        <View style={styles.card}>
-          <Text style={styles.label}>Staking consolidation</Text>
-          <TextInput
-            style={styles.input}
-            placeholder="Validator vote account"
-            placeholderTextColor={colors.muted}
-            value={validatorVote}
-            onChangeText={setValidatorVote}
-            autoCapitalize="none"
-          />
-          <TextInput
-            style={styles.input}
-            placeholder="Destination stake account"
-            placeholderTextColor={colors.muted}
-            value={destination}
-            onChangeText={setDestination}
-            autoCapitalize="none"
-          />
+        {mode === 'stake' && (
+          <View style={styles.card}>
+            <Text style={styles.label}>Stake (primary)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Validator vote account"
+              placeholderTextColor={colors.muted}
+              value={validatorVote}
+              onChangeText={setValidatorVote}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Destination stake account"
+              placeholderTextColor={colors.muted}
+              value={destination}
+              onChangeText={setDestination}
+              autoCapitalize="none"
+            />
 
-          <View style={styles.row}>
-            <ActionButton label="Refresh" onPress={loadStakeAccounts} />
-            <ActionButton label="Consolidate" onPress={onConsolidate} />
+            <View style={styles.row}>
+              <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={loadStakeAccounts} />
+              <ActionButton label={busy ? 'Working…' : 'Consolidate'} onPress={onConsolidate} />
+            </View>
+            <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
+
+            {stakeAccounts.map((a) => {
+              const checked = !!selected[a.pubkey];
+              const isDest = destination === a.pubkey;
+              return (
+                <Text
+                  key={a.pubkey}
+                  style={[styles.account, checked && styles.accountSelected, isDest && styles.accountDestination]}
+                  onPress={() => {
+                    const next = { ...selected };
+                    if (!checked && selectedCount >= 25) return;
+                    next[a.pubkey] = !checked;
+                    setSelected(next);
+                  }}
+                >
+                  {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
+                  {isDest ? '  (destination)' : ''}
+                </Text>
+              );
+            })}
           </View>
-          <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
+        )}
 
-          {stakeAccounts.map((a) => {
-            const checked = !!selected[a.pubkey];
-            const isDest = destination === a.pubkey;
-            return (
-              <Text
-                key={a.pubkey}
-                style={[styles.account, checked && styles.accountSelected, isDest && styles.accountDestination]}
-                onPress={() => {
-                  const next = { ...selected };
-                  if (!checked && selectedCount >= 25) return;
-                  next[a.pubkey] = !checked;
-                  setSelected(next);
-                }}
-              >
-                {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
-                {isDest ? '  (destination)' : ''}
-              </Text>
-            );
-          })}
-        </View>
+        {mode === 'send' && (
+          <View style={styles.card}>
+            <Text style={styles.label}>Send SOL (supports SNS .sol names)</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Recipient pubkey or name.sol"
+              placeholderTextColor={colors.muted}
+              value={sendTo}
+              onChangeText={setSendTo}
+              autoCapitalize="none"
+            />
+            <TextInput
+              style={styles.input}
+              placeholder="Amount SOL"
+              placeholderTextColor={colors.muted}
+              value={sendSol}
+              onChangeText={setSendSol}
+              keyboardType="decimal-pad"
+            />
+            <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
+          </View>
+        )}
+
+        {mode === 'receive' && (
+          <View style={styles.card}>
+            <Text style={styles.label}>Receive</Text>
+            <Text style={styles.meta}>Open your wallet address in Explorer to copy/share.</Text>
+            <ActionButton label="Open Receive Address" onPress={onReceive} />
+          </View>
+        )}
 
         <Text style={styles.status}>{status}</Text>
         {!!lastSignature && (
@@ -235,16 +270,27 @@ const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
   content: { padding: 20, gap: 14 },
   title: { fontSize: 30, fontWeight: '800', color: colors.text },
-  subtitle: { color: colors.muted, marginBottom: 8 },
+  subtitle: { color: colors.primary, marginBottom: 8 },
   card: {
     backgroundColor: colors.panel,
     borderWidth: 1,
-    borderColor: colors.border,
+    borderColor: colors.secondary,
     borderRadius: 14,
     padding: 14,
     gap: 10,
   },
   label: { color: colors.text, fontWeight: '700' },
+  walletBox: {
+    backgroundColor: '#0f0f16',
+    borderColor: colors.primary,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center'
+  },
+  walletText: { color: colors.primary, fontWeight: '700' },
   input: {
     backgroundColor: '#0f0f16',
     borderColor: colors.border,

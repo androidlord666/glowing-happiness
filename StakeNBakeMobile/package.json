@@ -17,7 +17,8 @@
     "@solana/web3.js": "^1.98.0",
     "@solana-mobile/mobile-wallet-adapter-protocol": "*",
     "@solana-mobile/mobile-wallet-adapter-protocol-web3js": "*",
-    "buffer": "^6.0.3"
+    "buffer": "^6.0.3",
+    "@bonfida/spl-name-service": "^3.0.16"
   },
   "devDependencies": {
     "@babel/core": "^7.25.2",
