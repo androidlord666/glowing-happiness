@@ -13,13 +13,13 @@ import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { connection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
 import { buildConsolidationTransactions } from './src/lib/stake';
-import { asPublicKey, MockWalletAdapter } from './src/lib/mwa';
+import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
 import { CLUSTER, DEFAULT_VALIDATOR_VOTE } from './src/config';
 import { txExplorerUrl, addressExplorerUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 
-const walletAdapter = new MockWalletAdapter();
+const walletAdapter = createWalletAdapter();
 
 export default function App() {
   const [wallet, setWallet] = useState<string>('');

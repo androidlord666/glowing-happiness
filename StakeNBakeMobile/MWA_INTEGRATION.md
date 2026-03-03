@@ -1,29 +1,46 @@
-# Solana Mobile Wallet Adapter Integration (next step)
+# Solana Mobile Wallet Adapter Integration
 
-Current app uses `MockWalletAdapter` (`src/lib/mwa.ts`) so the rest of the app flow can be developed and tested.
+`StakeNBakeMobile/src/lib/mwa.ts` now contains a real Solana Mobile Wallet Adapter implementation (`SolanaMobileWalletAdapter`) and runtime fallback to `MockWalletAdapter` when MWA packages are unavailable.
 
-To complete production MWA integration:
+## What is implemented
 
-1. Install Solana Mobile wallet adapter packages per latest Solana Mobile docs:
-   - https://docs.solanamobile.com/get-started/react-native/installation
-2. Replace `MockWalletAdapter` methods with:
-   - authorize/connect
-   - reauthorize (if needed)
-   - sign and send transactions
-   - deauthorize/disconnect
-3. Ensure Android intent-filter/deeplink config matches wallet adapter requirements.
-4. Test on Solana Mobile device with a supported wallet app.
+- `connect()`
+  - Uses MWA `transact(...)`
+  - Calls `wallet.authorize(...)`
+  - Extracts first account and normalizes to base58 address
+- `signAndSendTransactions()`
+  - Serializes transactions
+  - Calls `wallet.signAndSendTransactions(...)`
+  - Returns signatures as strings
+- `disconnect()`
+  - Calls `wallet.deauthorize(...)` when auth token exists
 
-## Interface target
+## Required packages
 
-Implement this interface in `src/lib/mwa.ts`:
+In `package.json`:
 
-```ts
-export type WalletAdapter = {
-  connect(): Promise<{ address: string }>;
-  disconnect(): Promise<void>;
-  signAndSendTransactions(txs: Transaction[]): Promise<string[]>;
-};
+- `@solana-mobile/mobile-wallet-adapter-protocol`
+- `@solana-mobile/mobile-wallet-adapter-protocol-web3js`
+- `buffer`
+
+Install:
+
+```bash
+cd StakeNBakeMobile
+npm install
 ```
 
-The rest of the app (`App.tsx`) is already wired to this interface.
+## Device validation checklist
+
+1. Install on Solana Mobile device
+2. Tap Connect and confirm wallet authorize prompt appears
+3. Verify wallet pubkey populates in app
+4. Test Send transaction signing
+5. Test Consolidate transaction signing
+6. Confirm explorer links resolve expected signatures
+
+## Notes
+
+- The app defaults to `devnet`.
+- If wallet adapter package resolution fails at runtime, app falls back to mock adapter (dev safety).
+- For production release, ensure MWA path is active on device and remove fallback if desired.

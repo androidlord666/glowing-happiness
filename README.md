@@ -10,7 +10,7 @@ Solana Mobile dApp for consolidating stake accounts (up to 25 source stake accou
 ## Current shipped features
 
 - Dark Solana-inspired mobile UI
-- Wallet connect/disconnect adapter layer (currently mock adapter; MWA swap-in point ready)
+- Wallet connect/disconnect/sign integration via Solana Mobile Wallet Adapter layer (with mock fallback safety)
 - Send flow (build transfer tx + sign/send via wallet adapter interface)
 - Receive flow (open wallet address in Solana explorer)
 - Stake account discovery
