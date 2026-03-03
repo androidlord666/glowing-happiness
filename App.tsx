@@ -1,5 +1,6 @@
 import React, { useMemo, useState } from 'react';
 import {
+  Linking,
   SafeAreaView,
   ScrollView,
   StatusBar,
@@ -8,12 +9,15 @@ import {
   TextInput,
   View
 } from 'react-native';
+import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { connection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
 import { buildConsolidationTransactions } from './src/lib/stake';
 import { asPublicKey, MockWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
-import { DEFAULT_VALIDATOR_VOTE } from './src/config';
+import { CLUSTER, DEFAULT_VALIDATOR_VOTE } from './src/config';
+import { txExplorerUrl, addressExplorerUrl } from './src/lib/explorer';
+import { buildTransferTx } from './src/lib/walletActions';
 
 const walletAdapter = new MockWalletAdapter();
 
@@ -23,6 +27,9 @@ export default function App() {
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [destination, setDestination] = useState<string>('');
   const [validatorVote, setValidatorVote] = useState(DEFAULT_VALIDATOR_VOTE);
+  const [sendTo, setSendTo] = useState('');
+  const [sendSol, setSendSol] = useState('0.01');
+  const [lastSignature, setLastSignature] = useState('');
   const [status, setStatus] = useState('Disconnected');
 
   const selectedKeys = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
@@ -43,6 +50,7 @@ export default function App() {
     setWallet('');
     setStakeAccounts([]);
     setSelected({});
+    setLastSignature('');
     setStatus('Disconnected');
   };
 
@@ -81,9 +89,43 @@ export default function App() {
 
       setStatus(`Signing ${txs.length} tx(s)...`);
       const sigs = await walletAdapter.signAndSendTransactions(txs);
-      setStatus(`Submitted ${sigs.length} tx(s). First signature: ${sigs[0]}`);
+      if (sigs[0]) setLastSignature(sigs[0]);
+      setStatus(`Submitted ${sigs.length} tx(s)`);
     } catch (e: any) {
       setStatus(`Consolidation error: ${e?.message ?? 'unknown error'}`);
+    }
+  };
+
+  const onSend = async () => {
+    try {
+      if (!wallet) throw new Error('Connect wallet first');
+      if (!sendTo) throw new Error('Recipient required');
+      const lamports = Math.round(Number(sendSol) * LAMPORTS_PER_SOL);
+      if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('Invalid SOL amount');
+
+      setStatus('Building transfer transaction...');
+      const tx = await buildTransferTx({
+        connection,
+        from: asPublicKey(wallet),
+        to: asPublicKey(sendTo),
+        lamports,
+      });
+
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      if (sigs[0]) setLastSignature(sigs[0]);
+      setStatus(`Transfer submitted${sigs[0] ? `: ${sigs[0]}` : ''}`);
+    } catch (e: any) {
+      setStatus(`Send error: ${e?.message ?? 'unknown error'}`);
+    }
+  };
+
+  const onReceive = async () => {
+    try {
+      if (!wallet) throw new Error('Connect wallet first');
+      await Linking.openURL(addressExplorerUrl(wallet, CLUSTER));
+      setStatus('Opened receive address in explorer');
+    } catch (e: any) {
+      setStatus(`Receive error: ${e?.message ?? 'unknown error'}`);
     }
   };
 
@@ -92,7 +134,7 @@ export default function App() {
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Solana stake consolidation · dark minimalist</Text>
+        <Text style={styles.subtitle}>Consolidate up to 25 stake accounts into 1 · {CLUSTER}</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Wallet</Text>
@@ -107,8 +149,28 @@ export default function App() {
           <View style={styles.row}>
             <ActionButton label="Connect" onPress={connectWallet} />
             <ActionButton label="Disconnect" onPress={disconnectWallet} />
-            <ActionButton label="Send" onPress={() => setStatus('Send flow next commit')} />
-            <ActionButton label="Receive" onPress={() => setStatus('Receive flow next commit')} />
+          </View>
+
+          <Text style={styles.label}>Send</Text>
+          <TextInput
+            style={styles.input}
+            placeholder="Recipient pubkey"
+            placeholderTextColor={colors.muted}
+            value={sendTo}
+            onChangeText={setSendTo}
+            autoCapitalize="none"
+          />
+          <TextInput
+            style={styles.input}
+            placeholder="Amount SOL"
+            placeholderTextColor={colors.muted}
+            value={sendSol}
+            onChangeText={setSendSol}
+            keyboardType="decimal-pad"
+          />
+          <View style={styles.row}>
+            <ActionButton label="Send" onPress={onSend} />
+            <ActionButton label="Receive" onPress={onReceive} />
           </View>
         </View>
 
@@ -159,6 +221,11 @@ export default function App() {
         </View>
 
         <Text style={styles.status}>{status}</Text>
+        {!!lastSignature && (
+          <Text style={styles.link} onPress={() => Linking.openURL(txExplorerUrl(lastSignature, CLUSTER))}>
+            Open last tx in explorer
+          </Text>
+        )}
       </ScrollView>
     </SafeAreaView>
   );
@@ -193,4 +260,5 @@ const styles = StyleSheet.create({
   accountSelected: { color: colors.primary },
   accountDestination: { color: colors.secondary },
   status: { color: colors.secondary, marginTop: 10 },
+  link: { color: colors.primary, textDecorationLine: 'underline', marginTop: 6 },
 });
