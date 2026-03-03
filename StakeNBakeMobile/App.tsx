@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import {
   Linking,
   SafeAreaView,
@@ -12,7 +12,7 @@ import {
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { connection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
-import { buildConsolidationTransactions } from './src/lib/stake';
+import { buildConsolidationTransactions, buildCreateAndDelegateStakeTx } from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
 import { CLUSTER, DEFAULT_VALIDATOR_VOTE } from './src/config';
@@ -23,6 +23,7 @@ import { resolveRecipientAddress } from './src/lib/sns';
 const walletAdapter = createWalletAdapter();
 
 type Mode = 'stake' | 'send' | 'receive';
+type Screen = 'splash' | 'landing' | 'app';
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -30,17 +31,24 @@ function shortAddr(v: string) {
 }
 
 export default function App() {
+  const [screen, setScreen] = useState<Screen>('splash');
   const [wallet, setWallet] = useState<string>('');
   const [mode, setMode] = useState<Mode>('stake');
   const [stakeAccounts, setStakeAccounts] = useState<StakeAccountInfo[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [destination, setDestination] = useState<string>('');
   const [validatorVote, setValidatorVote] = useState(DEFAULT_VALIDATOR_VOTE);
+  const [createStakeSol, setCreateStakeSol] = useState('0.1');
   const [sendTo, setSendTo] = useState('');
   const [sendSol, setSendSol] = useState('0.01');
   const [lastSignature, setLastSignature] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
+
+  useEffect(() => {
+    const t = setTimeout(() => setScreen('landing'), 1600);
+    return () => clearTimeout(t);
+  }, []);
 
   const selectedKeys = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
   const selectedCount = selectedKeys.length;
@@ -50,6 +58,7 @@ export default function App() {
       setBusy(true);
       const session = await walletAdapter.connect();
       setWallet(session.address);
+      setScreen('app');
       setStatus('Wallet connected. Ready to stake.');
     } catch (e: any) {
       setStatus(`Connect error: ${e?.message ?? 'unknown error'}`);
@@ -78,6 +87,33 @@ export default function App() {
       setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts found yet. Create/delegate one first.');
     } catch {
       setStatus('Could not refresh stake accounts right now. Please retry.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onCreateStake = async () => {
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      setBusy(true);
+      setStatus('Creating + delegating stake account...');
+
+      const seed = `snb-${Date.now()}`;
+      const { tx, stakeAddress } = await buildCreateAndDelegateStakeTx({
+        connection,
+        owner: asPublicKey(wallet),
+        validatorVote: asPublicKey(validatorVote),
+        solAmount: createStakeSol,
+        seed,
+      });
+
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      if (sigs[0]) setLastSignature(sigs[0]);
+      setDestination(stakeAddress);
+      setStatus(`Created stake account ${shortAddr(stakeAddress)} and delegated.`);
+      await loadStakeAccounts();
+    } catch (e: any) {
+      setStatus(`Create stake error: ${e?.message ?? 'unknown error'}`);
     } finally {
       setBusy(false);
     }
@@ -133,7 +169,7 @@ export default function App() {
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`Transfer submitted to ${recipient}`);
+      setStatus(`Transfer submitted to ${shortAddr(recipient)}`);
     } catch (e: any) {
       setStatus(`Send error: ${e?.message ?? 'unknown error'}`);
     } finally {
@@ -151,12 +187,36 @@ export default function App() {
     }
   };
 
+  if (screen === 'splash') {
+    return (
+      <SafeAreaView style={[styles.root, styles.centered]}>
+        <StatusBar barStyle="light-content" />
+        <Text style={styles.title}>stakeNbake</Text>
+        <Text style={styles.subtitle}>Solana Mobile Staking</Text>
+      </SafeAreaView>
+    );
+  }
+
+  if (screen === 'landing') {
+    return (
+      <SafeAreaView style={[styles.root, styles.centered]}>
+        <StatusBar barStyle="light-content" />
+        <Text style={styles.title}>stakeNbake</Text>
+        <Text style={styles.subtitle}>Create, delegate, and consolidate staking accounts.</Text>
+        <View style={styles.row}>
+          <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
+          <ActionButton label="Enter App" onPress={() => setScreen('app')} />
+        </View>
+      </SafeAreaView>
+    );
+  }
+
   return (
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.content}>
         <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Solana Mobile staking for {shortAddr(DEFAULT_VALIDATOR_VOTE)} · {CLUSTER}</Text>
+        <Text style={styles.subtitle}>Stake-first dApp · {CLUSTER}</Text>
 
         <View style={styles.card}>
           <Text style={styles.label}>Wallet</Text>
@@ -187,6 +247,19 @@ export default function App() {
               onChangeText={setValidatorVote}
               autoCapitalize="none"
             />
+
+            <Text style={styles.label}>Create and delegate stake account</Text>
+            <TextInput
+              style={styles.input}
+              placeholder="Stake amount in SOL"
+              placeholderTextColor={colors.muted}
+              value={createStakeSol}
+              onChangeText={setCreateStakeSol}
+              keyboardType="decimal-pad"
+            />
+            <ActionButton label={busy ? 'Creating…' : 'Create + Delegate'} onPress={onCreateStake} />
+
+            <Text style={styles.label}>Consolidate existing stake accounts</Text>
             <TextInput
               style={styles.input}
               placeholder="Destination stake account"
@@ -195,7 +268,6 @@ export default function App() {
               onChangeText={setDestination}
               autoCapitalize="none"
             />
-
             <View style={styles.row}>
               <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={loadStakeAccounts} />
               <ActionButton label={busy ? 'Working…' : 'Consolidate'} onPress={onConsolidate} />
@@ -268,9 +340,10 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
+  centered: { alignItems: 'center', justifyContent: 'center', padding: 24 },
   content: { padding: 20, gap: 14 },
-  title: { fontSize: 30, fontWeight: '800', color: colors.text },
-  subtitle: { color: colors.primary, marginBottom: 8 },
+  title: { fontSize: 32, fontWeight: '800', color: colors.text },
+  subtitle: { color: colors.primary, marginBottom: 8, textAlign: 'center' },
   card: {
     backgroundColor: colors.panel,
     borderWidth: 1,

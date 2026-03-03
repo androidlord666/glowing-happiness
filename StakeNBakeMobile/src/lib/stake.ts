@@ -18,18 +18,17 @@ export function lamportsToSol(lamports: number): string {
   return (lamports / LAMPORTS_PER_SOL).toFixed(4);
 }
 
+export function solToLamports(sol: string): number {
+  const value = Number(sol);
+  if (!Number.isFinite(value) || value <= 0) throw new Error('Invalid SOL amount');
+  return Math.round(value * LAMPORTS_PER_SOL);
+}
+
 export function assertConsolidationLimits(sourceCount: number): void {
   if (sourceCount < 1) throw new Error('Select at least one source stake account');
   if (sourceCount > 25) throw new Error('Maximum 25 source accounts per consolidation');
 }
 
-/**
- * MVP strategy:
- * - Delegate destination account to target validator (if needed)
- * - Merge each source stake account into destination
- *
- * NOTE: Merge requires stake state compatibility at runtime.
- */
 export async function buildConsolidationTransactions(params: {
   connection: Connection;
   owner: PublicKey;
@@ -73,19 +72,42 @@ export async function buildConsolidationTransactions(params: {
   return txs;
 }
 
-export function buildDestinationCreateTx(params: {
+export async function buildCreateAndDelegateStakeTx(params: {
+  connection: Connection;
   owner: PublicKey;
-  destination: PublicKey;
-  lamports: number;
-}): Transaction {
-  const { owner, destination, lamports } = params;
-  return new Transaction().add(
-    StakeProgram.createAccount({
-      fromPubkey: owner,
-      stakePubkey: destination,
-      lamports,
-      authorized: new Authorized(owner, owner),
-      lockup: new Lockup(0, 0, owner),
-    })
-  );
+  validatorVote: PublicKey;
+  solAmount: string;
+  seed: string;
+}): Promise<{ tx: Transaction; stakeAddress: string }> {
+  const { connection, owner, validatorVote, solAmount, seed } = params;
+  const lamports = solToLamports(solAmount);
+  const stakePubkey = await PublicKey.createWithSeed(owner, seed, StakeProgram.programId);
+
+  const recent = await connection.getLatestBlockhash('confirmed');
+
+  const tx = new Transaction({
+    feePayer: owner,
+    blockhash: recent.blockhash,
+    lastValidBlockHeight: recent.lastValidBlockHeight,
+  })
+    .add(
+      StakeProgram.createAccountWithSeed({
+        fromPubkey: owner,
+        basePubkey: owner,
+        seed,
+        stakePubkey,
+        lamports,
+        authorized: new Authorized(owner, owner),
+        lockup: new Lockup(0, 0, owner),
+      })
+    )
+    .add(
+      StakeProgram.delegate({
+        stakePubkey,
+        authorizedPubkey: owner,
+        votePubkey: validatorVote,
+      })
+    );
+
+  return { tx, stakeAddress: stakePubkey.toBase58() };
 }
