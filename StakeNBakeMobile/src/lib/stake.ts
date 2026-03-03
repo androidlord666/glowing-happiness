@@ -111,3 +111,23 @@ export async function buildCreateAndDelegateStakeTx(params: {
 
   return { tx, stakeAddress: stakePubkey.toBase58() };
 }
+
+export async function buildDeactivateStakeTx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  stakeAccount: PublicKey;
+}): Promise<Transaction> {
+  const { connection, owner, stakeAccount } = params;
+  const recent = await connection.getLatestBlockhash('confirmed');
+
+  return new Transaction({
+    feePayer: owner,
+    blockhash: recent.blockhash,
+    lastValidBlockHeight: recent.lastValidBlockHeight,
+  }).add(
+    StakeProgram.deactivate({
+      stakePubkey: stakeAccount,
+      authorizedPubkey: owner,
+    })
+  );
+}

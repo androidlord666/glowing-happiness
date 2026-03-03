@@ -12,11 +12,15 @@ import {
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { connection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
-import { buildConsolidationTransactions, buildCreateAndDelegateStakeTx } from './src/lib/stake';
+import {
+  buildConsolidationTransactions,
+  buildCreateAndDelegateStakeTx,
+  buildDeactivateStakeTx,
+} from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
 import { CLUSTER, DEFAULT_VALIDATOR_VOTE } from './src/config';
-import { txExplorerUrl, addressExplorerUrl } from './src/lib/explorer';
+import { addressExplorerUrl, txSolscanUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
 
@@ -37,7 +41,6 @@ export default function App() {
   const [stakeAccounts, setStakeAccounts] = useState<StakeAccountInfo[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [destination, setDestination] = useState<string>('');
-  const [validatorVote, setValidatorVote] = useState(DEFAULT_VALIDATOR_VOTE);
   const [createStakeSol, setCreateStakeSol] = useState('0.1');
   const [sendTo, setSendTo] = useState('');
   const [sendSol, setSendSol] = useState('0.01');
@@ -59,7 +62,7 @@ export default function App() {
       const session = await walletAdapter.connect();
       setWallet(session.address);
       setScreen('app');
-      setStatus('Wallet connected. Ready to stake.');
+      setStatus('Wallet connected. Stake tab is ready.');
     } catch (e: any) {
       setStatus(`Connect error: ${e?.message ?? 'unknown error'}`);
     } finally {
@@ -74,6 +77,7 @@ export default function App() {
     setSelected({});
     setLastSignature('');
     setStatus('Disconnected');
+    setScreen('landing');
   };
 
   const loadStakeAccounts = async () => {
@@ -84,7 +88,7 @@ export default function App() {
       const items = await fetchStakeAccounts(wallet);
       setStakeAccounts(items);
       if (!destination && items[0]) setDestination(items[0].pubkey);
-      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts found yet. Create/delegate one first.');
+      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts found yet. Use Create + Stake first.');
     } catch {
       setStatus('Could not refresh stake accounts right now. Please retry.');
     } finally {
@@ -96,13 +100,13 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Wallet not connected');
       setBusy(true);
-      setStatus('Creating + delegating stake account...');
+      setStatus('Creating and delegating stake account...');
 
       const seed = `snb-${Date.now()}`;
       const { tx, stakeAddress } = await buildCreateAndDelegateStakeTx({
         connection,
         owner: asPublicKey(wallet),
-        validatorVote: asPublicKey(validatorVote),
+        validatorVote: asPublicKey(DEFAULT_VALIDATOR_VOTE),
         solAmount: createStakeSol,
         seed,
       });
@@ -110,10 +114,32 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) setLastSignature(sigs[0]);
       setDestination(stakeAddress);
-      setStatus(`Created stake account ${shortAddr(stakeAddress)} and delegated.`);
+      setStatus(`✅ Staked ${createStakeSol} SOL to Solana Mobile validator.`);
       await loadStakeAccounts();
     } catch (e: any) {
-      setStatus(`Create stake error: ${e?.message ?? 'unknown error'}`);
+      setStatus(`Create+stake error: ${e?.message ?? 'unknown error'}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onUnstake = async () => {
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      if (!destination) throw new Error('Set/select a stake account first');
+      setBusy(true);
+      setStatus('Submitting unstake (deactivate) transaction...');
+
+      const tx = await buildDeactivateStakeTx({
+        connection,
+        owner: asPublicKey(wallet),
+        stakeAccount: asPublicKey(destination),
+      });
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      if (sigs[0]) setLastSignature(sigs[0]);
+      setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)} (deactivation epoch rules apply).`);
+    } catch (e: any) {
+      setStatus(`Unstake error: ${e?.message ?? 'unknown error'}`);
     } finally {
       setBusy(false);
     }
@@ -129,23 +155,22 @@ export default function App() {
       if (sources.length > 25) throw new Error('Max 25 source accounts');
 
       setBusy(true);
-      setStatus('Building stake consolidation transactions...');
+      setStatus('Building consolidation transactions...');
       const txs = await buildConsolidationTransactions({
         connection,
         owner: asPublicKey(wallet),
         plan: {
           destination: asPublicKey(destination),
           sources,
-          validatorVote: asPublicKey(validatorVote),
+          validatorVote: asPublicKey(DEFAULT_VALIDATOR_VOTE),
         },
       });
 
-      setStatus(`Signing ${txs.length} stake tx(s)...`);
       const sigs = await walletAdapter.signAndSendTransactions(txs);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`Stake consolidation submitted (${sigs.length} tx)`);
+      setStatus(`✅ Consolidation submitted (${sigs.length} tx).`);
     } catch (e: any) {
-      setStatus(`Stake error: ${e?.message ?? 'unknown error'}`);
+      setStatus(`Consolidation error: ${e?.message ?? 'unknown error'}`);
     } finally {
       setBusy(false);
     }
@@ -169,7 +194,7 @@ export default function App() {
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`Transfer submitted to ${shortAddr(recipient)}`);
+      setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
     } catch (e: any) {
       setStatus(`Send error: ${e?.message ?? 'unknown error'}`);
     } finally {
@@ -181,7 +206,7 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Connect wallet first');
       await Linking.openURL(addressExplorerUrl(wallet, CLUSTER));
-      setStatus('Opened wallet receive address');
+      setStatus('Opened wallet receive address.');
     } catch (e: any) {
       setStatus(`Receive error: ${e?.message ?? 'unknown error'}`);
     }
@@ -202,11 +227,8 @@ export default function App() {
       <SafeAreaView style={[styles.root, styles.centered]}>
         <StatusBar barStyle="light-content" />
         <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Create, delegate, and consolidate staking accounts.</Text>
-        <View style={styles.row}>
-          <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
-          <ActionButton label="Enter App" onPress={() => setScreen('app')} />
-        </View>
+        <Text style={styles.subtitle}>Connect wallet to continue.</Text>
+        <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
       </SafeAreaView>
     );
   }
@@ -220,14 +242,10 @@ export default function App() {
 
         <View style={styles.card}>
           <Text style={styles.label}>Wallet</Text>
-          {!wallet ? (
-            <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
-          ) : (
-            <View style={styles.walletBox}>
-              <Text style={styles.walletText}>{shortAddr(wallet)}</Text>
-              <ActionButton label="Disconnect" onPress={disconnectWallet} />
-            </View>
-          )}
+          <View style={styles.walletBox}>
+            <Text style={styles.walletText}>{shortAddr(wallet)}</Text>
+            <ActionButton label="Disconnect" onPress={disconnectWallet} />
+          </View>
 
           <View style={styles.row}>
             <ActionButton label="Stake" onPress={() => setMode('stake')} />
@@ -239,25 +257,23 @@ export default function App() {
         {mode === 'stake' && (
           <View style={styles.card}>
             <Text style={styles.label}>Stake (primary)</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Validator vote account"
-              placeholderTextColor={colors.muted}
-              value={validatorVote}
-              onChangeText={setValidatorVote}
-              autoCapitalize="none"
-            />
+            <View style={styles.validatorBox}>
+              <Text style={styles.validatorTitle}>Solana Mobile Validator</Text>
+              <Text style={styles.validatorAddr}>{DEFAULT_VALIDATOR_VOTE}</Text>
+            </View>
 
-            <Text style={styles.label}>Create and delegate stake account</Text>
             <TextInput
               style={styles.input}
-              placeholder="Stake amount in SOL"
+              placeholder="Amount SOL to stake"
               placeholderTextColor={colors.muted}
               value={createStakeSol}
               onChangeText={setCreateStakeSol}
               keyboardType="decimal-pad"
             />
-            <ActionButton label={busy ? 'Creating…' : 'Create + Delegate'} onPress={onCreateStake} />
+            <View style={styles.row}>
+              <ActionButton label={busy ? 'Staking…' : 'Create + Stake'} onPress={onCreateStake} />
+              <ActionButton label={busy ? 'Unstaking…' : 'Unstake'} onPress={onUnstake} />
+            </View>
 
             <Text style={styles.label}>Consolidate existing stake accounts</Text>
             <TextInput
@@ -270,10 +286,10 @@ export default function App() {
             />
             <View style={styles.row}>
               <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={loadStakeAccounts} />
-              <ActionButton label={busy ? 'Working…' : 'Consolidate'} onPress={onConsolidate} />
+              <ActionButton label={busy ? 'Consolidating…' : 'Consolidate'} onPress={onConsolidate} />
             </View>
-            <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
 
+            <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
             {stakeAccounts.map((a) => {
               const checked = !!selected[a.pubkey];
               const isDest = destination === a.pubkey;
@@ -322,15 +338,15 @@ export default function App() {
         {mode === 'receive' && (
           <View style={styles.card}>
             <Text style={styles.label}>Receive</Text>
-            <Text style={styles.meta}>Open your wallet address in Explorer to copy/share.</Text>
+            <Text style={styles.meta}>Open wallet address in explorer and share/copy there.</Text>
             <ActionButton label="Open Receive Address" onPress={onReceive} />
           </View>
         )}
 
         <Text style={styles.status}>{status}</Text>
         {!!lastSignature && (
-          <Text style={styles.link} onPress={() => Linking.openURL(txExplorerUrl(lastSignature, CLUSTER))}>
-            Open last tx in explorer
+          <Text style={styles.link} onPress={() => Linking.openURL(txSolscanUrl(lastSignature, CLUSTER))}>
+            Open latest transaction on Solscan
           </Text>
         )}
       </ScrollView>
@@ -340,7 +356,7 @@ export default function App() {
 
 const styles = StyleSheet.create({
   root: { flex: 1, backgroundColor: colors.bg },
-  centered: { alignItems: 'center', justifyContent: 'center', padding: 24 },
+  centered: { alignItems: 'center', justifyContent: 'center', padding: 24, gap: 10 },
   content: { padding: 20, gap: 14 },
   title: { fontSize: 32, fontWeight: '800', color: colors.text },
   subtitle: { color: colors.primary, marginBottom: 8, textAlign: 'center' },
@@ -364,6 +380,16 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   walletText: { color: colors.primary, fontWeight: '700' },
+  validatorBox: {
+    backgroundColor: '#0f0f16',
+    borderColor: colors.secondary,
+    borderWidth: 1,
+    borderRadius: 12,
+    padding: 10,
+    gap: 6,
+  },
+  validatorTitle: { color: colors.text, fontWeight: '700' },
+  validatorAddr: { color: colors.primary, fontSize: 12 },
   input: {
     backgroundColor: '#0f0f16',
     borderColor: colors.border,

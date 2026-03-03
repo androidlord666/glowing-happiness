@@ -5,3 +5,8 @@ export function txExplorerUrl(signature: string, cluster: string = 'devnet'): st
 export function addressExplorerUrl(address: string, cluster: string = 'devnet'): string {
   return `https://explorer.solana.com/address/${address}?cluster=${cluster}`;
 }
+
+export function txSolscanUrl(signature: string, cluster: string = 'devnet'): string {
+  const suffix = cluster === 'mainnet-beta' ? '' : `?cluster=${cluster}`;
+  return `https://solscan.io/tx/${signature}${suffix}`;
+}
