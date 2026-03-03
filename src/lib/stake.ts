@@ -1,0 +1,91 @@
+import {
+  Connection,
+  PublicKey,
+  StakeProgram,
+  Transaction,
+  Authorized,
+  Lockup,
+  LAMPORTS_PER_SOL,
+} from '@solana/web3.js';
+
+export type ConsolidationPlan = {
+  sources: PublicKey[];
+  destination: PublicKey;
+  validatorVote: PublicKey;
+};
+
+export function lamportsToSol(lamports: number): string {
+  return (lamports / LAMPORTS_PER_SOL).toFixed(4);
+}
+
+export function assertConsolidationLimits(sourceCount: number): void {
+  if (sourceCount < 1) throw new Error('Select at least one source stake account');
+  if (sourceCount > 25) throw new Error('Maximum 25 source accounts per consolidation');
+}
+
+/**
+ * MVP strategy:
+ * - Delegate destination account to target validator (if needed)
+ * - Merge each source stake account into destination
+ *
+ * NOTE: Merge requires stake state compatibility at runtime.
+ */
+export async function buildConsolidationTransactions(params: {
+  connection: Connection;
+  owner: PublicKey;
+  plan: ConsolidationPlan;
+}): Promise<Transaction[]> {
+  const { connection, owner, plan } = params;
+  assertConsolidationLimits(plan.sources.length);
+
+  const recent = await connection.getLatestBlockhash('confirmed');
+  const txs: Transaction[] = [];
+
+  const delegateTx = new Transaction({
+    feePayer: owner,
+    blockhash: recent.blockhash,
+    lastValidBlockHeight: recent.lastValidBlockHeight,
+  }).add(
+    StakeProgram.delegate({
+      stakePubkey: plan.destination,
+      authorizedPubkey: owner,
+      votePubkey: plan.validatorVote,
+    })
+  );
+
+  txs.push(delegateTx);
+
+  for (const source of plan.sources) {
+    const t = new Transaction({
+      feePayer: owner,
+      blockhash: recent.blockhash,
+      lastValidBlockHeight: recent.lastValidBlockHeight,
+    }).add(
+      StakeProgram.merge({
+        authorizedPubkey: owner,
+        stakePubkey: plan.destination,
+        sourceStakePubKey: source,
+      })
+    );
+    txs.push(t);
+  }
+
+  return txs;
+}
+
+export function buildDestinationCreateTx(params: {
+  owner: PublicKey;
+  destination: PublicKey;
+  lamports: number;
+}): Transaction {
+  const { owner, destination, lamports } = params;
+  return new Transaction().add(
+    StakeProgram.createAccount({
+      fromPubkey: owner,
+      stakePubkey: destination,
+      lamports,
+      authorized: new Authorized(owner, owner),
+      lockup: new Lockup(0, 0, owner),
+    })
+  );
+}
