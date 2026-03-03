@@ -1,0 +1,56 @@
+name: mobile-ci
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'StakeNBakeMobile/**'
+      - '.github/workflows/mobile-ci.yml'
+  pull_request:
+    paths:
+      - 'StakeNBakeMobile/**'
+      - '.github/workflows/mobile-ci.yml'
+
+jobs:
+  build-android-debug:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: StakeNBakeMobile
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: StakeNBakeMobile/package-lock.json
+
+      - name: Install JS deps
+        run: npm ci
+
+      - name: Typecheck
+        run: npm exec tsc -- --noEmit
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - name: Setup Android SDK
+        uses: android-actions/setup-android@v3
+
+      - name: Build debug APK
+        run: |
+          cd android
+          ./gradlew assembleDebug --no-daemon
+
+      - name: Upload debug APK artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: stakeNbake-debug-apk
+          path: StakeNBakeMobile/android/app/build/outputs/apk/debug/app-debug.apk
