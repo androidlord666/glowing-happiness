@@ -109,10 +109,17 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
     const transact = await this.loadTransact();
 
     const signatures = await transact(async (wallet: any) => {
-      const payload = txs.map((tx) => tx.serialize({ requireAllSignatures: false, verifySignatures: false }));
+      if (this.authToken && wallet.reauthorize) {
+        const reauth = await wallet.reauthorize({
+          auth_token: this.authToken,
+          identity: this.appIdentity,
+        });
+        if (reauth?.auth_token) this.authToken = reauth.auth_token;
+      }
 
       const out = await wallet.signAndSendTransactions({
-        transactions: payload,
+        // For web3js helper, pass Transaction objects directly.
+        transactions: txs,
         ...(this.authToken ? { auth_token: this.authToken } : {}),
       });
 

@@ -21,7 +21,7 @@ export async function fetchStakeAccounts(owner: string): Promise<StakeAccountInf
   );
 
   return accounts
-    .filter((a: any) => a.account?.data?.parsed?.type === 'delegated' || a.account?.data?.parsed?.type === 'initialized')
+    .filter((a: any) => !!a.account?.data?.parsed?.info?.meta?.authorized)
     .filter((a: any) => isOwnedBy(ownerKey, a.account?.data?.parsed))
     .map((a) => ({ pubkey: a.pubkey.toBase58(), lamports: a.account.lamports }));
 }
