@@ -1,6 +1,6 @@
 import { Connection, PublicKey } from '@solana/web3.js';
 
-export const RPC_URL = 'https://api.devnet.solana.com';
+export const RPC_URL = 'https://api.mainnet-beta.solana.com';
 export const connection = new Connection(RPC_URL, 'confirmed');
 
 export type StakeAccountInfo = {

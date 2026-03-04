@@ -1,5 +1,6 @@
 import { Buffer } from 'buffer';
 import { PublicKey, Transaction } from '@solana/web3.js';
+import { CLUSTER } from '../config';
 
 export type WalletSession = {
   address: string;
@@ -72,7 +73,7 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
 
     const result = await transact(async (wallet: any) => {
       const auth = await wallet.authorize({
-        cluster: 'devnet',
+        cluster: CLUSTER,
         identity: this.appIdentity,
       });
 
