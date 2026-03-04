@@ -46,6 +46,8 @@ export default function App() {
   const [createStakeSol, setCreateStakeSol] = useState('0.1');
   const [sendTo, setSendTo] = useState('');
   const [sendSol, setSendSol] = useState('0.01');
+  const [snsPreview, setSnsPreview] = useState('');
+  const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [lastSignature, setLastSignature] = useState('');
   const [busy, setBusy] = useState(false);
@@ -55,6 +57,33 @@ export default function App() {
     const t = setTimeout(() => setScreen('landing'), 1200);
     return () => clearTimeout(t);
   }, []);
+
+  useEffect(() => {
+    const candidate = sendTo.trim();
+    if (!candidate.toLowerCase().endsWith('.sol')) {
+      setSnsPreview('');
+      setSnsPreviewBusy(false);
+      return;
+    }
+
+    let cancelled = false;
+    const t = setTimeout(async () => {
+      try {
+        setSnsPreviewBusy(true);
+        const resolved = await resolveRecipientAddress(candidate, connection);
+        if (!cancelled) setSnsPreview(resolved);
+      } catch {
+        if (!cancelled) setSnsPreview('');
+      } finally {
+        if (!cancelled) setSnsPreviewBusy(false);
+      }
+    }, 450);
+
+    return () => {
+      cancelled = true;
+      clearTimeout(t);
+    };
+  }, [sendTo]);
 
   const selectedKeys = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
   const selectedCount = selectedKeys.length;
@@ -194,6 +223,7 @@ export default function App() {
       if (!wallet) throw new Error('Connect wallet first');
       if (!sendTo.trim()) throw new Error('Enter recipient address or .sol name');
 
+      setStatus(sendTo.trim().toLowerCase().endsWith('.sol') ? 'Resolving SNS name...' : 'Validating recipient...');
       const recipient = await resolveRecipientAddress(sendTo, connection);
       const lamports = Math.round(Number(sendSol) * LAMPORTS_PER_SOL);
       if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('Invalid SOL amount');
@@ -335,6 +365,15 @@ export default function App() {
               onChangeText={setSendTo}
               autoCapitalize="none"
             />
+            {sendTo.trim().toLowerCase().endsWith('.sol') && (
+              <Text style={styles.meta}>
+                {snsPreviewBusy
+                  ? 'Resolving SNS name...'
+                  : snsPreview
+                    ? `Resolves to: ${shortAddr(snsPreview)}`
+                    : 'Could not resolve this .sol yet'}
+              </Text>
+            )}
             <TextInput
               style={styles.input}
               placeholder="Amount SOL"
