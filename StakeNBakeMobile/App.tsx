@@ -36,6 +36,25 @@ function shortAddr(v: string) {
   return `${v.slice(0, 6)}...${v.slice(-6)}`;
 }
 
+function normalizeErrorMessage(e: any): string {
+  const raw = String(e?.message ?? e ?? 'unknown error');
+  const lower = raw.toLowerCase();
+  if (
+    lower.includes('cancel') ||
+    lower.includes('declin') ||
+    lower.includes('rejected') ||
+    lower.includes('user denied') ||
+    lower.includes('user aborted')
+  ) {
+    return 'Transaction cancelled by user.';
+  }
+  return raw;
+}
+
+function actionError(prefix: string, e: any): string {
+  return `${prefix}: ${normalizeErrorMessage(e)}`;
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('splash');
   const [wallet, setWallet] = useState<string>('');
@@ -85,8 +104,17 @@ export default function App() {
     };
   }, [sendTo]);
 
-  const selectedKeys = useMemo(() => Object.keys(selected).filter((k) => selected[k]), [selected]);
-  const selectedCount = selectedKeys.length;
+  useEffect(() => {
+    if (!destination) return;
+    if (!selected[destination]) return;
+    setSelected((prev) => ({ ...prev, [destination]: false }));
+  }, [destination, selected]);
+
+  const sourceSelectedKeys = useMemo(
+    () => Object.keys(selected).filter((k) => selected[k] && k !== destination),
+    [selected, destination]
+  );
+  const selectedCount = sourceSelectedKeys.length;
 
   const connectWallet = async () => {
     try {
@@ -97,7 +125,7 @@ export default function App() {
       setStatus('Wallet connected.');
       await loadStakeAccounts(session.address);
     } catch (e: any) {
-      setStatus(`Connect error: ${e?.message ?? 'unknown error'}`);
+      setStatus(actionError('Connect error', e));
     } finally {
       setBusy(false);
     }
@@ -121,10 +149,14 @@ export default function App() {
       setStatus('Refreshing stake accounts...');
       const items = await fetchStakeAccounts(activeWallet);
       setStakeAccounts(items);
-      if (!destination && items[0]) setDestination(items[0].pubkey);
+      if (!items.length) {
+        setDestination('');
+      } else if (!destination || !items.some((i) => i.pubkey === destination)) {
+        setDestination(items[0].pubkey);
+      }
       setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
     } catch (e: any) {
-      setStatus(`Refresh failed: ${e?.message ?? 'Please retry'}`);
+      setStatus(actionError('Refresh failed', e));
     } finally {
       setBusy(false);
     }
@@ -159,7 +191,7 @@ export default function App() {
       setStatus(`✅ Staked ${createStakeSol} SOL to Solana Mobile validator.`);
       await loadStakeAccounts();
     } catch (e: any) {
-      setStatus(`Create+stake error: ${e?.message ?? 'unknown error'}`);
+      setStatus(actionError('Create+stake error', e));
     } finally {
       setBusy(false);
     }
@@ -181,7 +213,7 @@ export default function App() {
       if (sigs[0]) setLastSignature(sigs[0]);
       setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}.`);
     } catch (e: any) {
-      setStatus(`Unstake error: ${e?.message ?? 'unknown error'}`);
+      setStatus(actionError('Unstake error', e));
     } finally {
       setBusy(false);
     }
@@ -192,7 +224,7 @@ export default function App() {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select destination stake account from list below');
 
-      const sources = selectedKeys.filter((k) => k !== destination).map(asPublicKey);
+      const sources = sourceSelectedKeys.map(asPublicKey);
       if (sources.length === 0) throw new Error('Select source stake account(s) below');
       if (sources.length > 25) throw new Error('Max 25 source stake accounts');
 
@@ -212,7 +244,7 @@ export default function App() {
       if (sigs[0]) setLastSignature(sigs[0]);
       setStatus(`✅ Consolidation submitted (${sigs.length} tx).`);
     } catch (e: any) {
-      setStatus(`Consolidation error: ${e?.message ?? 'unknown error'}`);
+      setStatus(actionError('Consolidation error', e));
     } finally {
       setBusy(false);
     }
@@ -241,7 +273,7 @@ export default function App() {
       if (sigs[0]) setLastSignature(sigs[0]);
       setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
     } catch (e: any) {
-      setStatus(`Send error: ${e?.message ?? 'unknown error'}`);
+      setStatus(actionError('Send error', e));
     } finally {
       setBusy(false);
     }
@@ -317,37 +349,46 @@ export default function App() {
             </View>
 
             <Text style={styles.label}>Consolidate existing stake accounts</Text>
-            <Text style={styles.meta}>Pick destination and source accounts from the list below (same connected wallet authority).</Text>
-            <TextInput
-              style={styles.input}
-              placeholder="Destination stake account"
-              placeholderTextColor={colors.muted}
-              value={destination}
-              onChangeText={setDestination}
-              autoCapitalize="none"
-            />
+            <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
+            <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
+            {!stakeAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
+            {stakeAccounts.map((a) => {
+              const isDest = destination === a.pubkey;
+              return (
+                <Text
+                  key={`dest-${a.pubkey}`}
+                  style={[styles.account, isDest && styles.accountDestination]}
+                  onPress={() => setDestination(a.pubkey)}
+                >
+                  {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
+                </Text>
+              );
+            })}
+
             <View style={styles.row}>
               <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={() => loadStakeAccounts()} />
               <ActionButton label={busy ? 'Consolidating…' : 'Consolidate'} onPress={onConsolidate} />
             </View>
 
+            <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
-            {stakeAccounts.map((a) => {
+            {stakeAccounts.filter((a) => a.pubkey !== destination).map((a) => {
               const checked = !!selected[a.pubkey];
-              const isDest = destination === a.pubkey;
               return (
                 <Text
-                  key={a.pubkey}
-                  style={[styles.account, checked && styles.accountSelected, isDest && styles.accountDestination]}
+                  key={`src-${a.pubkey}`}
+                  style={[styles.account, checked && styles.accountSelected]}
                   onPress={() => {
                     const next = { ...selected };
-                    if (!checked && selectedCount >= 25) return;
+                    if (!checked && selectedCount >= 25) {
+                      setStatus('Maximum 25 source stake accounts.');
+                      return;
+                    }
                     next[a.pubkey] = !checked;
                     setSelected(next);
                   }}
                 >
                   {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
-                  {isDest ? '  (destination)' : ''}
                 </Text>
               );
             })}
