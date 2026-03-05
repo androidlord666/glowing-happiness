@@ -224,7 +224,12 @@ export default function App() {
       }
       setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
     } catch (e: any) {
-      setStatus(actionError('Refresh failed', e));
+      const raw = String(e?.message ?? e ?? '').toLowerCase();
+      if (raw.includes('429') || raw.includes('too many requests')) {
+        setStatus('Please wait a few moments to refresh 🙏😎');
+      } else {
+        setStatus(actionError('Refresh failed', e));
+      }
     } finally {
       setBusy(false);
     }
