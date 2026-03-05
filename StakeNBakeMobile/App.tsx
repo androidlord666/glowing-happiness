@@ -380,6 +380,7 @@ export default function App() {
     return (
       <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: '#000' }]}> 
         <StatusBar barStyle={'light-content'} />
+        <Text style={styles.cornerSolanaS}>S</Text>
         <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
           <Text style={[styles.title, { color: '#fff' }]}>{APP_NAME}</Text>
           <View style={[styles.card, { width: '100%', backgroundColor: '#0A1A1E', borderColor: '#1A4548' }]}> 
@@ -396,6 +397,7 @@ export default function App() {
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
+      <Text style={styles.cornerSolanaS}>S</Text>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.rowBetween}>
           <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
@@ -576,6 +578,16 @@ const styles = StyleSheet.create({
   subtitle: { color: colors.primary, marginBottom: 8, textAlign: 'center' },
   splashLogo: { width: 320, height: 90 },
   bannerLogo: { width: '100%', height: 46, marginBottom: 6 },
+  cornerSolanaS: {
+    position: 'absolute',
+    left: 14,
+    bottom: 12,
+    color: '#14F195',
+    opacity: 0.6,
+    fontSize: 16,
+    fontWeight: '800',
+    zIndex: 10,
+  },
   card: {
     backgroundColor: colors.panel,
     borderWidth: 1,
