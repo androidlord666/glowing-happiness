@@ -158,7 +158,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [sendTo]);
+  }, [sendTo, connection]);
 
   useEffect(() => {
     if (!destination) return;
