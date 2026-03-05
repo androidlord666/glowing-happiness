@@ -264,9 +264,13 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select destination stake account from list below');
+      const availableSourceCount = stakeAccounts.filter((a) => a.pubkey !== destination).length;
+      if (availableSourceCount < 1) {
+        throw new Error('Need at least 2 stake accounts. Create another stake account, then select source account(s).');
+      }
 
       const sources = sourceSelectedKeys.map(asPublicKey);
-      if (sources.length === 0) throw new Error('Select source stake account(s) below');
+      if (sources.length === 0) throw new Error('Select at least one source stake account below.');
       if (sources.length > 25) throw new Error('Max 25 source stake accounts');
 
       setBusy(true);
@@ -440,6 +444,9 @@ export default function App() {
 
             <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
+            {stakeAccounts.filter((a) => a.pubkey !== destination).length === 0 && (
+              <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>
+            )}
             {stakeAccounts.filter((a) => a.pubkey !== destination).map((a) => {
               const checked = !!selected[a.pubkey];
               return (
