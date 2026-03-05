@@ -8,12 +8,18 @@ export function txUrl(signature: string, cluster: ClusterName, explorer: Explore
   if (explorer === 'orbmarkets') {
     return `https://orbmarkets.io/tx/${signature}${clusterSuffix(cluster)}`;
   }
+  if (explorer === 'solana') {
+    return `https://explorer.solana.com/tx/${signature}${clusterSuffix(cluster)}`;
+  }
   return `https://solscan.io/tx/${signature}${clusterSuffix(cluster)}`;
 }
 
 export function addressUrl(address: string, cluster: ClusterName, explorer: ExplorerName): string {
   if (explorer === 'orbmarkets') {
     return `https://orbmarkets.io/address/${address}${clusterSuffix(cluster)}`;
+  }
+  if (explorer === 'solana') {
+    return `https://explorer.solana.com/address/${address}${clusterSuffix(cluster)}`;
   }
   return `https://solscan.io/account/${address}${clusterSuffix(cluster)}`;
 }

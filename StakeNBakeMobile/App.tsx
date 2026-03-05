@@ -66,6 +66,7 @@ export default function App() {
   const [cluster, setCluster] = useState<ClusterName>(DEFAULT_CLUSTER);
   const [explorer, setExplorer] = useState<ExplorerName>(DEFAULT_EXPLORER);
   const [showSettings, setShowSettings] = useState(false);
+  const [showExplorerOptions, setShowExplorerOptions] = useState(false);
   const [stakeAccounts, setStakeAccounts] = useState<StakeAccountInfo[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [destination, setDestination] = useState<string>('');
@@ -83,12 +84,14 @@ export default function App() {
     ? colors
     : {
       ...colors,
-      bg: '#FFFFFF',
-      panel: '#F3F7FA',
-      text: '#0A1014',
-      muted: '#55616C',
-      border: '#D0DEE8',
+      bg: '#EFFFFB',
+      panel: '#DDF7F1',
+      text: '#072225',
+      muted: '#3C7F80',
+      border: '#8ADFD3',
     };
+
+  const explorerLabel = explorer === 'orbmarkets' ? 'OrbMarkets.io' : explorer === 'solscan' ? 'Solscan.io' : 'Explorer.Solana.com';
 
   const connection = useMemo(() => createConnection(cluster), [cluster]);
 
@@ -367,7 +370,14 @@ export default function App() {
               <ActionButton label={`Network: ${cluster === 'devnet' ? 'Devnet' : 'Mainnet'}`} onPress={() => setCluster((c) => c === 'devnet' ? 'mainnet-beta' : 'devnet')} />
               <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
             </View>
-            <ActionButton label={`Explorer: ${explorer === 'orbmarkets' ? 'OrbMarkets' : 'Solscan'}`} onPress={() => setExplorer((e) => e === 'orbmarkets' ? 'solscan' : 'orbmarkets')} />
+            <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
+            {showExplorerOptions && (
+              <View style={styles.dropdownBox}>
+                <Text style={styles.dropdownItem} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
+                <Text style={styles.dropdownItem} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
+                <Text style={styles.dropdownItem} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
+              </View>
+            )}
           </View>
         )}
 
@@ -561,6 +571,19 @@ const styles = StyleSheet.create({
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   gearBtn: { padding: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.panel },
+  dropdownBox: {
+    borderWidth: 1,
+    borderColor: colors.border,
+    borderRadius: 10,
+    paddingVertical: 6,
+    backgroundColor: '#081416',
+  },
+  dropdownItem: {
+    color: colors.text,
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    fontWeight: '600',
+  },
   qrWrap: { alignItems: 'center', marginVertical: 8 },
   meta: { color: colors.muted },
   account: { color: colors.text, paddingVertical: 6 },

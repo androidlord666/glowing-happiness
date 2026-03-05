@@ -1,7 +1,7 @@
 export const APP_NAME = 'Solana Mobile Staking';
 
 export type ClusterName = 'devnet' | 'mainnet-beta';
-export type ExplorerName = 'orbmarkets' | 'solscan';
+export type ExplorerName = 'orbmarkets' | 'solscan' | 'solana';
 
 export const DEFAULT_CLUSTER: ClusterName = 'mainnet-beta';
 export const DEFAULT_EXPLORER: ExplorerName = 'orbmarkets';
