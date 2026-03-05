@@ -26,7 +26,15 @@ export async function resolveRecipientAddress(input: string, connection: Connect
   const { getDomainKeySync, NameRegistryState } = mod;
 
   try {
-    const { pubkey } = getDomainKeySync(v);
+    const domain = v.slice(0, -4); // strip `.sol`
+
+    let pubkey: PublicKey;
+    try {
+      ({ pubkey } = getDomainKeySync(domain));
+    } catch {
+      ({ pubkey } = getDomainKeySync(v));
+    }
+
     const registry = await NameRegistryState.retrieve(connection, pubkey);
 
     if (!registry?.registry?.owner) throw new Error('unregistered');
