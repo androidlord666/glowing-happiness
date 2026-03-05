@@ -1,12 +1,19 @@
-export function txExplorerUrl(signature: string, cluster: string = 'devnet'): string {
-  return `https://explorer.solana.com/tx/${signature}?cluster=${cluster}`;
+import { ClusterName, ExplorerName } from '../config';
+
+function clusterSuffix(cluster: ClusterName): string {
+  return cluster === 'mainnet-beta' ? '' : `?cluster=${cluster}`;
 }
 
-export function addressExplorerUrl(address: string, cluster: string = 'devnet'): string {
-  return `https://explorer.solana.com/address/${address}?cluster=${cluster}`;
+export function txUrl(signature: string, cluster: ClusterName, explorer: ExplorerName): string {
+  if (explorer === 'orbmarkets') {
+    return `https://orbmarkets.io/tx/${signature}${clusterSuffix(cluster)}`;
+  }
+  return `https://solscan.io/tx/${signature}${clusterSuffix(cluster)}`;
 }
 
-export function txSolscanUrl(signature: string, cluster: string = 'devnet'): string {
-  const suffix = cluster === 'mainnet-beta' ? '' : `?cluster=${cluster}`;
-  return `https://solscan.io/tx/${signature}${suffix}`;
+export function addressUrl(address: string, cluster: ClusterName, explorer: ExplorerName): string {
+  if (explorer === 'orbmarkets') {
+    return `https://orbmarkets.io/address/${address}${clusterSuffix(cluster)}`;
+  }
+  return `https://solscan.io/account/${address}${clusterSuffix(cluster)}`;
 }

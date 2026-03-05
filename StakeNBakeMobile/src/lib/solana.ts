@@ -1,11 +1,7 @@
 import { Connection, PublicKey } from '@solana/web3.js';
-
-export const RPC_URL = 'https://api.devnet.solana.com';
-export const connection = new Connection(RPC_URL, 'confirmed');
+import { ClusterName, RPC_URLS } from '../config';
 
 const STAKE_PROGRAM_ID = new PublicKey('Stake11111111111111111111111111111111111111');
-// StakeStateV2 layout offsets (after enum discriminant + rent reserve):
-// staker: 12, withdrawer: 44
 const AUTH_STAKER_OFFSET = 12;
 const AUTH_WITHDRAWER_OFFSET = 44;
 
@@ -14,7 +10,11 @@ export type StakeAccountInfo = {
   lamports: number;
 };
 
-export async function fetchStakeAccounts(owner: string): Promise<StakeAccountInfo[]> {
+export function createConnection(cluster: ClusterName): Connection {
+  return new Connection(RPC_URLS[cluster], 'confirmed');
+}
+
+export async function fetchStakeAccounts(connection: Connection, owner: string): Promise<StakeAccountInfo[]> {
   const ownerKey = new PublicKey(owner).toBase58();
 
   const [asStaker, asWithdrawer] = await Promise.all([

@@ -7,13 +7,14 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  View
+  View,
+  Pressable
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
-import { connection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
+import { createConnection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
 import {
   buildConsolidationTransactions,
   buildCreateAndDelegateStakeTx,
@@ -21,8 +22,8 @@ import {
 } from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
-import { CLUSTER, DEFAULT_VALIDATOR_VOTE } from './src/config';
-import { addressExplorerUrl, txSolscanUrl } from './src/lib/explorer';
+import { ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
+import { addressUrl, txUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
 
@@ -30,6 +31,7 @@ const walletAdapter = createWalletAdapter();
 
 type Mode = 'stake' | 'send' | 'receive';
 type Screen = 'splash' | 'landing' | 'app';
+type ThemeMode = 'dark' | 'light';
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -57,8 +59,13 @@ function actionError(prefix: string, e: any): string {
 
 export default function App() {
   const [screen, setScreen] = useState<Screen>('splash');
+  const [splashPhase, setSplashPhase] = useState<0 | 1>(0);
   const [wallet, setWallet] = useState<string>('');
   const [mode, setMode] = useState<Mode>('stake');
+  const [theme, setTheme] = useState<ThemeMode>('dark');
+  const [cluster, setCluster] = useState<ClusterName>(DEFAULT_CLUSTER);
+  const [explorer, setExplorer] = useState<ExplorerName>(DEFAULT_EXPLORER);
+  const [showSettings, setShowSettings] = useState(false);
   const [stakeAccounts, setStakeAccounts] = useState<StakeAccountInfo[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
   const [destination, setDestination] = useState<string>('');
@@ -72,10 +79,31 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
 
+  const palette = theme === 'dark'
+    ? colors
+    : {
+      ...colors,
+      bg: '#FFFFFF',
+      panel: '#F3F7FA',
+      text: '#0A1014',
+      muted: '#55616C',
+      border: '#D0DEE8',
+    };
+
+  const connection = useMemo(() => createConnection(cluster), [cluster]);
+
   useEffect(() => {
-    const t = setTimeout(() => setScreen('landing'), 1200);
-    return () => clearTimeout(t);
+    const t1 = setTimeout(() => setSplashPhase(1), 800);
+    const t2 = setTimeout(() => setScreen('landing'), 1800);
+    return () => {
+      clearTimeout(t1);
+      clearTimeout(t2);
+    };
   }, []);
+
+  useEffect(() => {
+    setStatus('');
+  }, [mode]);
 
   useEffect(() => {
     const candidate = sendTo.trim();
@@ -115,11 +143,21 @@ export default function App() {
     [selected, destination]
   );
   const selectedCount = sourceSelectedKeys.length;
+  const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
+
+  useEffect(() => {
+    if (!wallet) return;
+    setStakeAccounts([]);
+    setSelected({});
+    setDestination('');
+    loadStakeAccounts(wallet);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [cluster]);
 
   const connectWallet = async () => {
     try {
       setBusy(true);
-      const session = await walletAdapter.connect();
+      const session = await walletAdapter.connect(cluster);
       setWallet(session.address);
       setScreen('app');
       setStatus('Wallet connected.');
@@ -147,7 +185,7 @@ export default function App() {
       if (!activeWallet) throw new Error('Connect wallet first');
       setBusy(true);
       setStatus('Refreshing stake accounts...');
-      const items = await fetchStakeAccounts(activeWallet);
+      const items = await fetchStakeAccounts(connection, activeWallet);
       setStakeAccounts(items);
       if (!items.length) {
         setDestination('');
@@ -180,7 +218,7 @@ export default function App() {
       const { tx, stakeAddress } = await buildCreateAndDelegateStakeTx({
         connection,
         owner: asPublicKey(wallet),
-        validatorVote: asPublicKey(DEFAULT_VALIDATOR_VOTE),
+        validatorVote: asPublicKey(validatorVote),
         solAmount: createStakeSol,
         seed,
       });
@@ -236,7 +274,7 @@ export default function App() {
         plan: {
           destination: asPublicKey(destination),
           sources,
-          validatorVote: asPublicKey(DEFAULT_VALIDATOR_VOTE),
+          validatorVote: asPublicKey(validatorVote),
         },
       });
 
@@ -286,34 +324,56 @@ export default function App() {
   };
 
   if (screen === 'splash') {
+    const black = splashPhase === 0;
     return (
-      <SafeAreaView style={[styles.root, styles.centered]}>
-        <StatusBar barStyle="light-content" />
-        <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Solana Mobile Staking</Text>
+      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: black ? '#000' : '#fff' }]}>
+        <StatusBar barStyle={black ? 'light-content' : 'dark-content'} />
+        <Text style={[styles.title, { color: black ? '#fff' : '#000' }]}>SOLANA MOBILE</Text>
+        <Text style={[styles.subtitle, { color: black ? '#fff' : '#000' }]}>{black ? 'white on black' : 'black on white'}</Text>
       </SafeAreaView>
     );
   }
 
   if (screen === 'landing') {
     return (
-      <SafeAreaView style={[styles.root, styles.centered]}>
-        <StatusBar barStyle="light-content" />
-        <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Connect wallet to continue.</Text>
+      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: palette.bg }]}>
+        <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
+        <Text style={[styles.title, { color: palette.text }]}>stakeNbake</Text>
+        <View style={[styles.card, { width: '100%', backgroundColor: palette.panel, borderColor: palette.border }]}> 
+          <Text style={[styles.label, { color: palette.text }]}>SOLANA MOBILE</Text>
+          <Text style={[styles.meta, { color: palette.muted }]}>Officially branded wallet connection flow</Text>
+          <Text style={[styles.meta, { color: palette.primary }]}>Network: {cluster}</Text>
+        </View>
+        <Text style={[styles.subtitle, { color: palette.primary }]}>Connect wallet to continue.</Text>
         <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
       </SafeAreaView>
     );
   }
 
   return (
-    <SafeAreaView style={styles.root}>
-      <StatusBar barStyle="light-content" />
+    <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
+      <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>stakeNbake</Text>
-        <Text style={styles.subtitle}>Stake-first dApp · {CLUSTER}</Text>
+        <View style={styles.rowBetween}>
+          <Text style={[styles.title, { color: palette.text }]}>stakeNbake</Text>
+          <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtn}>
+            <Text style={{ fontSize: 18 }}>⚙️</Text>
+          </Pressable>
+        </View>
+        <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · {cluster}</Text>
 
-        <View style={styles.card}>
+        {showSettings && (
+          <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}> 
+            <Text style={[styles.label, { color: palette.text }]}>Settings</Text>
+            <View style={styles.row}>
+              <ActionButton label={`Network: ${cluster === 'devnet' ? 'Devnet' : 'Mainnet'}`} onPress={() => setCluster((c) => c === 'devnet' ? 'mainnet-beta' : 'devnet')} />
+              <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
+            </View>
+            <ActionButton label={`Explorer: ${explorer === 'orbmarkets' ? 'OrbMarkets' : 'Solscan'}`} onPress={() => setExplorer((e) => e === 'orbmarkets' ? 'solscan' : 'orbmarkets')} />
+          </View>
+        )}
+
+        <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={styles.label}>Wallet</Text>
           <View style={styles.walletBox}>
             <Text style={styles.walletText}>{shortAddr(wallet)}</Text>
@@ -332,7 +392,7 @@ export default function App() {
             <Text style={styles.label}>Stake (primary)</Text>
             <View style={styles.validatorBox}>
               <Text style={styles.validatorTitle}>Solana Mobile Validator</Text>
-              <Text style={styles.validatorAddr}>{DEFAULT_VALIDATOR_VOTE}</Text>
+              <Text style={styles.validatorAddr}>{validatorVote}</Text>
             </View>
 
             <TextInput
@@ -440,13 +500,13 @@ export default function App() {
                 <QRCode value={wallet} size={180} backgroundColor={colors.panel} color={colors.text} />
               </View>
             )}
-            <ActionButton label="Open in Explorer" onPress={() => Linking.openURL(addressExplorerUrl(wallet, CLUSTER))} />
+            <ActionButton label="Open in Explorer" onPress={() => Linking.openURL(addressUrl(wallet, cluster, explorer))} />
           </View>
         )}
 
         <Text style={styles.status}>{status}</Text>
         {!!lastSignature && (
-          <Text style={styles.link} onPress={() => Linking.openURL(txSolscanUrl(lastSignature, CLUSTER))}>
+          <Text style={styles.link} onPress={() => Linking.openURL(txUrl(lastSignature, cluster, explorer))}>
             Open latest transaction on Solscan
           </Text>
         )}
@@ -501,6 +561,8 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
+  gearBtn: { padding: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.panel },
   qrWrap: { alignItems: 'center', marginVertical: 8 },
   meta: { color: colors.muted },
   account: { color: colors.text, paddingVertical: 6 },

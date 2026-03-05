@@ -1,13 +1,13 @@
 import { Buffer } from 'buffer';
 import { PublicKey, Transaction } from '@solana/web3.js';
-import { CLUSTER } from '../config';
+import { ClusterName } from '../config';
 
 export type WalletSession = {
   address: string;
 };
 
 export type WalletAdapter = {
-  connect(): Promise<WalletSession>;
+  connect(cluster: ClusterName): Promise<WalletSession>;
   disconnect(): Promise<void>;
   signAndSendTransactions(txs: Transaction[]): Promise<string[]>;
 };
@@ -68,12 +68,12 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
     }
   }
 
-  async connect(): Promise<WalletSession> {
+  async connect(cluster: ClusterName): Promise<WalletSession> {
     const transact = await this.loadTransact();
 
     const result = await transact(async (wallet: any) => {
       const auth = await wallet.authorize({
-        cluster: CLUSTER,
+        cluster,
         identity: this.appIdentity,
       });
 
@@ -134,7 +134,7 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
 export class MockWalletAdapter implements WalletAdapter {
   private address: string | null = null;
 
-  async connect(): Promise<WalletSession> {
+  async connect(_cluster: ClusterName): Promise<WalletSession> {
     this.address = '11111111111111111111111111111111';
     return { address: this.address };
   }

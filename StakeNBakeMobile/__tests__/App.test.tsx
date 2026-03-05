@@ -10,7 +10,7 @@ jest.mock('@solana/web3.js', () => ({
 }));
 
 jest.mock('../src/lib/solana', () => ({
-  connection: {},
+  createConnection: jest.fn().mockReturnValue({}),
   fetchStakeAccounts: jest.fn().mockResolvedValue([]),
 }));
 
