@@ -85,6 +85,7 @@ export default function App() {
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
   const modeFade = useState(new Animated.Value(1))[0];
+  const landingFade = useState(new Animated.Value(0))[0];
 
   const palette = theme === 'dark'
     ? colors
@@ -120,6 +121,17 @@ export default function App() {
       useNativeDriver: true,
     }).start();
   }, [mode, modeFade]);
+
+  useEffect(() => {
+    if (screen !== 'landing') return;
+    landingFade.setValue(0);
+    Animated.timing(landingFade, {
+      toValue: 1,
+      duration: 650,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [screen, landingFade]);
 
   useEffect(() => {
     const candidate = sendTo.trim();
@@ -361,15 +373,17 @@ export default function App() {
 
   if (screen === 'landing') {
     return (
-      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: palette.bg }]}>
+      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: palette.bg }]}> 
         <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
-        <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
-        <View style={[styles.card, { width: '100%', backgroundColor: palette.panel, borderColor: palette.border }]}> 
-          <Image source={solanaMobileBlackLogo} style={styles.bannerLogo} resizeMode="contain" />
-          <Text style={[styles.meta, { color: palette.primary }]}>Network: {cluster}</Text>
-        </View>
-        <Text style={[styles.subtitle, { color: palette.primary }]}>Connect wallet to continue.</Text>
-        <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
+        <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
+          <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
+          <View style={[styles.card, { width: '100%', backgroundColor: palette.panel, borderColor: palette.border }]}> 
+            <Image source={solanaMobileWhiteLogo} style={styles.bannerLogo} resizeMode="contain" />
+            <Text style={[styles.meta, { color: palette.primary }]}>Network: {cluster}</Text>
+          </View>
+          <Text style={[styles.subtitle, { color: palette.primary }]}>Connect wallet to continue.</Text>
+          <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
+        </Animated.View>
       </SafeAreaView>
     );
   }
