@@ -173,10 +173,12 @@ export default function App() {
   };
 
   const disconnectWallet = async () => {
-    await walletAdapter.disconnect();
+    // Local disconnect only to avoid forcing wallet app/account picker on user-initiated disconnect.
+    // Full deauthorize happens when wallet app/session requires it during next connect flow.
     setWallet('');
     setStakeAccounts([]);
     setSelected({});
+    setDestination('');
     setLastSignature('');
     setStatus('Disconnected');
     setScreen('landing');
