@@ -1,4 +1,4 @@
-export const APP_NAME = 'Solana Mobile Staking';
+export const APP_NAME = 'Staking with Solana Mobile';
 
 export type ClusterName = 'devnet' | 'mainnet-beta';
 export type ExplorerName = 'orbmarkets' | 'solscan' | 'solana';
