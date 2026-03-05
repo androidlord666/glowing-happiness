@@ -380,7 +380,6 @@ export default function App() {
     return (
       <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: '#000' }]}> 
         <StatusBar barStyle={'light-content'} />
-        <Text style={styles.cornerSolanaS}>S</Text>
         <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
           <Text style={[styles.title, { color: '#fff' }]}>{APP_NAME}</Text>
           <View style={[styles.card, { width: '100%', backgroundColor: '#0A1A1E', borderColor: '#1A4548' }]}> 
