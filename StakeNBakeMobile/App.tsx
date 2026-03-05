@@ -8,7 +8,9 @@ import {
   Text,
   TextInput,
   View,
-  Pressable
+  Pressable,
+  Animated,
+  Easing
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -79,6 +81,7 @@ export default function App() {
   const [lastSignature, setLastSignature] = useState('');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
+  const modeFade = useState(new Animated.Value(1))[0];
 
   const palette = theme === 'dark'
     ? colors
@@ -106,7 +109,14 @@ export default function App() {
 
   useEffect(() => {
     setStatus('');
-  }, [mode]);
+    modeFade.setValue(0.92);
+    Animated.timing(modeFade, {
+      toValue: 1,
+      duration: 180,
+      easing: Easing.out(Easing.cubic),
+      useNativeDriver: true,
+    }).start();
+  }, [mode, modeFade]);
 
   useEffect(() => {
     const candidate = sendTo.trim();
@@ -402,7 +412,7 @@ export default function App() {
         </View>
 
         {mode === 'stake' && (
-          <View style={styles.card}>
+          <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Solana Mobile Staking</Text>
             <View style={styles.validatorBox}>
               <Text style={styles.validatorTitle}>Solana Mobile Validator</Text>
@@ -469,11 +479,11 @@ export default function App() {
                 </Text>
               );
             })}
-          </View>
+          </Animated.View>
         )}
 
         {mode === 'send' && (
-          <View style={styles.card}>
+          <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Send SOL (supports SNS .sol names)</Text>
             <TextInput
               style={styles.input}
@@ -501,11 +511,11 @@ export default function App() {
               keyboardType="decimal-pad"
             />
             <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
-          </View>
+          </Animated.View>
         )}
 
         {mode === 'receive' && (
-          <View style={styles.card}>
+          <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Receive</Text>
             <View style={styles.row}>
               <ActionButton label="Copy Address" onPress={copyWalletAddress} />
@@ -518,7 +528,7 @@ export default function App() {
               </View>
             )}
             <ActionButton label="Open in Explorer" onPress={() => Linking.openURL(addressUrl(wallet, cluster, explorer))} />
-          </View>
+          </Animated.View>
         )}
 
         <Text style={styles.status}>{status}</Text>
