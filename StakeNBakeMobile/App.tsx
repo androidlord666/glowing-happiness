@@ -22,7 +22,7 @@ import {
 } from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
-import { ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
+import { APP_NAME, ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
 import { addressUrl, txUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
@@ -93,8 +93,8 @@ export default function App() {
   const connection = useMemo(() => createConnection(cluster), [cluster]);
 
   useEffect(() => {
-    const t1 = setTimeout(() => setSplashPhase(1), 800);
-    const t2 = setTimeout(() => setScreen('landing'), 1800);
+    const t1 = setTimeout(() => setSplashPhase(1), 1500);
+    const t2 = setTimeout(() => setScreen('landing'), 3200);
     return () => {
       clearTimeout(t1);
       clearTimeout(t2);
@@ -329,7 +329,6 @@ export default function App() {
       <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: black ? '#000' : '#fff' }]}>
         <StatusBar barStyle={black ? 'light-content' : 'dark-content'} />
         <Text style={[styles.title, { color: black ? '#fff' : '#000' }]}>SOLANA MOBILE</Text>
-        <Text style={[styles.subtitle, { color: black ? '#fff' : '#000' }]}>{black ? 'white on black' : 'black on white'}</Text>
       </SafeAreaView>
     );
   }
@@ -338,10 +337,9 @@ export default function App() {
     return (
       <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: palette.bg }]}>
         <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
-        <Text style={[styles.title, { color: palette.text }]}>stakeNbake</Text>
+        <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
         <View style={[styles.card, { width: '100%', backgroundColor: palette.panel, borderColor: palette.border }]}> 
           <Text style={[styles.label, { color: palette.text }]}>SOLANA MOBILE</Text>
-          <Text style={[styles.meta, { color: palette.muted }]}>Officially branded wallet connection flow</Text>
           <Text style={[styles.meta, { color: palette.primary }]}>Network: {cluster}</Text>
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Connect wallet to continue.</Text>
@@ -355,7 +353,7 @@ export default function App() {
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.title, { color: palette.text }]}>stakeNbake</Text>
+          <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
           <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtn}>
             <Text style={{ fontSize: 18 }}>⚙️</Text>
           </Pressable>
@@ -363,7 +361,7 @@ export default function App() {
         <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · {cluster}</Text>
 
         {showSettings && (
-          <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}> 
+          <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
             <Text style={[styles.label, { color: palette.text }]}>Settings</Text>
             <View style={styles.row}>
               <ActionButton label={`Network: ${cluster === 'devnet' ? 'Devnet' : 'Mainnet'}`} onPress={() => setCluster((c) => c === 'devnet' ? 'mainnet-beta' : 'devnet')} />
@@ -381,7 +379,7 @@ export default function App() {
           </View>
 
           <View style={styles.row}>
-            <ActionButton label="Stake" onPress={() => setMode('stake')} />
+            <ActionButton label="Staking" onPress={() => setMode('stake')} />
             <ActionButton label="Send" onPress={() => setMode('send')} />
             <ActionButton label="Receive" onPress={() => setMode('receive')} />
           </View>
@@ -389,7 +387,7 @@ export default function App() {
 
         {mode === 'stake' && (
           <View style={styles.card}>
-            <Text style={styles.label}>Stake (primary)</Text>
+            <Text style={styles.label}>Solana Mobile Staking</Text>
             <View style={styles.validatorBox}>
               <Text style={styles.validatorTitle}>Solana Mobile Validator</Text>
               <Text style={styles.validatorAddr}>{validatorVote}</Text>

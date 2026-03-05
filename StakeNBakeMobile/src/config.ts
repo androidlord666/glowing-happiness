@@ -1,9 +1,9 @@
-export const APP_NAME = 'stakeNbake';
+export const APP_NAME = 'Solana Mobile Staking';
 
 export type ClusterName = 'devnet' | 'mainnet-beta';
 export type ExplorerName = 'orbmarkets' | 'solscan';
 
-export const DEFAULT_CLUSTER: ClusterName = 'devnet';
+export const DEFAULT_CLUSTER: ClusterName = 'mainnet-beta';
 export const DEFAULT_EXPLORER: ExplorerName = 'orbmarkets';
 
 export const RPC_URLS: Record<ClusterName, string> = {
