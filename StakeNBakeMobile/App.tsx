@@ -10,7 +10,8 @@ import {
   View,
   Pressable,
   Animated,
-  Easing
+  Easing,
+  Image
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -30,6 +31,8 @@ import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
 
 const walletAdapter = createWalletAdapter();
+const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
+const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
 
 type Mode = 'stake' | 'send' | 'receive';
 type Screen = 'splash' | 'landing' | 'app';
@@ -347,7 +350,11 @@ export default function App() {
     return (
       <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: black ? '#000' : '#fff' }]}>
         <StatusBar barStyle={black ? 'light-content' : 'dark-content'} />
-        <Text style={[styles.title, { color: black ? '#fff' : '#000' }]}>SOLANA MOBILE</Text>
+        <Image
+          source={black ? solanaMobileWhiteLogo : solanaMobileBlackLogo}
+          style={styles.splashLogo}
+          resizeMode="contain"
+        />
       </SafeAreaView>
     );
   }
@@ -358,7 +365,7 @@ export default function App() {
         <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
         <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
         <View style={[styles.card, { width: '100%', backgroundColor: palette.panel, borderColor: palette.border }]}> 
-          <Text style={[styles.label, { color: palette.text }]}>SOLANA MOBILE</Text>
+          <Image source={solanaMobileBlackLogo} style={styles.bannerLogo} resizeMode="contain" />
           <Text style={[styles.meta, { color: palette.primary }]}>Network: {cluster}</Text>
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Connect wallet to continue.</Text>
@@ -548,6 +555,8 @@ const styles = StyleSheet.create({
   content: { padding: 20, gap: 14 },
   title: { fontSize: 32, fontWeight: '800', color: colors.text },
   subtitle: { color: colors.primary, marginBottom: 8, textAlign: 'center' },
+  splashLogo: { width: 320, height: 90 },
+  bannerLogo: { width: '100%', height: 46, marginBottom: 6 },
   card: {
     backgroundColor: colors.panel,
     borderWidth: 1,
