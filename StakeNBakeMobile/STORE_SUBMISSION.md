@@ -1,7 +1,7 @@
 # Solana Mobile dApp Store Submission Pack
 
 ## App
-- **Name:** Solana Mobile Staking
+- **Name:** Staking with Solana Mobile
 - **Category:** Finance / Staking
 - **Primary function:** Stake, unstake, consolidate stake accounts, and send SOL with Solana Mobile Wallet Adapter integration.
 

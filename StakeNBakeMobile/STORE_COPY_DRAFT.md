@@ -1,10 +1,10 @@
-# Store Copy Draft — Solana Mobile Staking
+# Store Copy Draft — Staking with Solana Mobile
 
 ## Short Description
 Stake, unstake, consolidate, and send SOL with a premium Solana Mobile-first experience.
 
 ## Long Description
-Solana Mobile Staking is a focused staking utility for Solana Mobile users.
+Staking with Solana Mobile is a focused staking utility for Solana Mobile users.
 
 Built for speed and clarity, it lets you:
 - Connect wallet with Solana Mobile Wallet Adapter
