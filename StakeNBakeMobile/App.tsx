@@ -510,16 +510,13 @@ export default function App() {
         },
       });
 
-      const sigs: string[] = [];
-      for (let i = 0; i < txs.length; i++) {
-        setStatus(`Submitting consolidation tx ${i + 1}/${txs.length}...`);
-        const out = await walletAdapter.signAndSendTransactions([txs[i]]);
-        if (out[0]) {
-          sigs.push(out[0]);
-          rememberTx(out[0]);
-          trackPendingTx(out[0], `Consolidation tx ${i + 1}/${txs.length}`);
-        }
-      }
+      setStatus(`Submitting consolidation transactions (${txs.length})...`);
+      const sigs = await walletAdapter.signAndSendTransactions(txs);
+      sigs.forEach((sig, i) => {
+        if (!sig) return;
+        rememberTx(sig);
+        trackPendingTx(sig, `Consolidation tx ${i + 1}/${txs.length}`);
+      });
 
       setSelected({});
       setStatus(`✅ Consolidation submitted (${sigs.length}/${txs.length} tx). Refreshing accounts...`);
