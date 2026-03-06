@@ -11,6 +11,16 @@ export const RPC_URLS: Record<ClusterName, string> = {
   'mainnet-beta': 'https://api.mainnet-beta.solana.com',
 };
 
+export const RPC_FALLBACK_URLS: Record<ClusterName, string[]> = {
+  devnet: [
+    'https://rpc.ankr.com/solana_devnet',
+  ],
+  'mainnet-beta': [
+    'https://solana-rpc.publicnode.com',
+    'https://rpc.ankr.com/solana',
+  ],
+};
+
 export const VALIDATOR_VOTE_BY_CLUSTER: Record<ClusterName, string> = {
   devnet: 'SKRuTecmFDZHjs2DxRTJNEK7m7hunKGTWJiaZ3tMVVA',
   'mainnet-beta': 'SKRuTecmFDZHjs2DxRTJNEK7m7hunKGTWJiaZ3tMVVA',

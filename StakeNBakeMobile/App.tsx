@@ -222,6 +222,7 @@ export default function App() {
   }, [cluster]);
 
   const connectWallet = async () => {
+    if (busy) return;
     try {
       setBusy(true);
       const session = await walletAdapter.connect(cluster);
@@ -267,7 +268,7 @@ export default function App() {
       setStatus('Refreshing stake accounts...');
 
       const items = await withRetries(
-        () => fetchStakeAccounts(connection, activeWallet),
+        () => fetchStakeAccounts(connection, activeWallet, cluster),
         2,
         500
       );
@@ -304,6 +305,7 @@ export default function App() {
   };
 
   const onCreateStake = async () => {
+    if (busy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(createStakeSol);
@@ -343,6 +345,7 @@ export default function App() {
   };
 
   const onUnstake = async () => {
+    if (busy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select a stake account first');
@@ -369,6 +372,7 @@ export default function App() {
   };
 
   const onConsolidate = async () => {
+    if (busy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select destination stake account from list below');
@@ -430,6 +434,7 @@ export default function App() {
   };
 
   const onSend = async () => {
+    if (busy) return;
     try {
       if (!wallet) throw new Error('Connect wallet first');
       if (!sendTo.trim()) throw new Error('Enter recipient address or .sol name');
