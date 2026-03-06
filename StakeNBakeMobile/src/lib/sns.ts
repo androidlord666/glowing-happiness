@@ -29,11 +29,30 @@ export async function resolveRecipientAddress(input: string, connection: Connect
   const mod = await loadSns();
   if (!mod) throw new Error('SNS resolver not installed. Use wallet pubkey or install @bonfida/spl-name-service');
 
-  const { getDomainKeySync, NameRegistryState } = mod;
+  const { resolve, getDomainKeySync, NameRegistryState } = mod;
 
   try {
-    const domain = v.slice(0, -4); // strip `.sol`
+    const clients = [
+      connection,
+      ...SNS_FALLBACK_RPC_URLS.map((u) => new Connection(u, 'confirmed')),
+    ];
 
+    // Preferred SNS SDK path (handles v2 resolver behavior better than raw registry owner reads).
+    let lastErr: any;
+    if (typeof resolve === 'function') {
+      for (const client of clients) {
+        try {
+          const out = await resolve(client, v);
+          const out58 = out?.toBase58 ? out.toBase58() : String(out);
+          return new PublicKey(out58).toBase58();
+        } catch (err: any) {
+          lastErr = err;
+        }
+      }
+    }
+
+    // Fallback: direct registry owner lookup.
+    const domain = v.slice(0, -4); // strip `.sol`
     let pubkey: PublicKey;
     try {
       ({ pubkey } = getDomainKeySync(domain));
@@ -41,16 +60,8 @@ export async function resolveRecipientAddress(input: string, connection: Connect
       ({ pubkey } = getDomainKeySync(v));
     }
 
-    const tried: string[] = [];
-    const clients = [
-      connection,
-      ...SNS_FALLBACK_RPC_URLS.map((u) => new Connection(u, 'confirmed')),
-    ];
-
-    let lastErr: any;
     for (const client of clients) {
       try {
-        tried.push((client as any)?._rpcEndpoint ?? 'unknown');
         const registry = await NameRegistryState.retrieve(client, pubkey);
         if (!registry?.registry?.owner) throw new Error('unregistered');
         return new PublicKey(registry.registry.owner).toBase58();
@@ -63,7 +74,7 @@ export async function resolveRecipientAddress(input: string, connection: Connect
       }
     }
 
-    throw lastErr ?? new Error(`SNS resolution failed after RPC fallbacks: ${tried.join(', ')}`);
+    throw lastErr ?? new Error('SNS resolution failed across all resolvers');
   } catch (e: any) {
     const msg = String(e?.message ?? '').toLowerCase();
     if (msg.includes('429') || msg.includes('too many requests')) {
