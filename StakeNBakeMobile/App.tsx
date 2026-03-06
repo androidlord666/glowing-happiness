@@ -473,6 +473,25 @@ export default function App() {
     setStatus('Wallet address copied to clipboard.');
   };
 
+  const copyDebugReport = () => {
+    const report = {
+      app: 'stakeNbake',
+      cluster,
+      explorer,
+      mode,
+      wallet: wallet || null,
+      destination: destination || null,
+      stakeAccountCount: stakeAccounts.length,
+      selectedSourceCount: selectedCount,
+      lastSignature: lastSignature || null,
+      status,
+      timestamp: new Date().toISOString(),
+    };
+
+    Clipboard.setString(JSON.stringify(report, null, 2));
+    setStatus('Debug report copied to clipboard.');
+  };
+
   if (screen === 'splash') {
     const whitePhase = splashPhase === 0;
     return (
@@ -679,6 +698,8 @@ export default function App() {
               <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
             </View>
           )}
+
+          <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
 
         </View>
       )}
