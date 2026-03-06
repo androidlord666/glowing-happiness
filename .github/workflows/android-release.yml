@@ -2,6 +2,15 @@ name: android-release
 
 on:
   workflow_dispatch:
+    inputs:
+      versionCode:
+        description: 'Override Android versionCode (optional)'
+        required: false
+        type: string
+      versionName:
+        description: 'Override Android versionName (optional)'
+        required: false
+        type: string
   push:
     branches: [main]
     paths:
@@ -70,6 +79,22 @@ jobs:
           MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD
           MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD
           EOF
+
+      - name: Apply version overrides (workflow_dispatch)
+        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.versionCode != '' || inputs.versionName != '') }}
+        env:
+          INPUT_VERSION_CODE: ${{ inputs.versionCode }}
+          INPUT_VERSION_NAME: ${{ inputs.versionName }}
+        run: |
+          FILE="android/app/build.gradle"
+          if [ -n "$INPUT_VERSION_CODE" ]; then
+            sed -i -E "s/versionCode[[:space:]]+[0-9]+/versionCode $INPUT_VERSION_CODE/" "$FILE"
+          fi
+          if [ -n "$INPUT_VERSION_NAME" ]; then
+            sed -i -E "s/versionName[[:space:]]+\"[^\"]+\"/versionName \"$INPUT_VERSION_NAME\"/" "$FILE"
+          fi
+          echo "Resolved version lines:"
+          grep -E "versionCode|versionName" "$FILE"
 
       - name: Bundle React Native JS for release
         run: |
