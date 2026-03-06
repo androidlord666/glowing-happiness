@@ -394,13 +394,9 @@ export default function App() {
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
-      <Text style={styles.cornerSolanaS}>S</Text>
       <ScrollView contentContainerStyle={styles.content}>
-        <View style={styles.rowBetween}>
+        <View style={styles.headerCenter}>
           <Image source={solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
-          <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtn}>
-            <Text style={{ fontSize: 18 }}>⚙️</Text>
-          </Pressable>
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · Mainnet</Text>
 
@@ -557,6 +553,9 @@ export default function App() {
         )}
 
         <Text style={styles.status}>{status}</Text>
+        <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnBottomRight}>
+          <Text style={{ fontSize: 18 }}>⚙️</Text>
+        </Pressable>
         {!!lastSignature && (
           <Text style={styles.link} onPress={() => Linking.openURL(txUrl(lastSignature, cluster, explorer))}>
             Open latest transaction on Solscan
@@ -575,16 +574,7 @@ const styles = StyleSheet.create({
   subtitle: { color: colors.primary, marginBottom: 8, textAlign: 'center' },
   splashLogo: { width: 320, height: 90 },
   bannerLogo: { width: '100%', height: 46, marginBottom: 6 },
-  cornerSolanaS: {
-    position: 'absolute',
-    left: 14,
-    bottom: 12,
-    color: '#14F195',
-    opacity: 0.6,
-    fontSize: 16,
-    fontWeight: '800',
-    zIndex: 10,
-  },
+
   card: {
     backgroundColor: colors.panel,
     borderWidth: 1,
@@ -633,8 +623,18 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  headerCenter: { alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
   headerLogo: { width: 240, height: 40 },
-  gearBtn: { padding: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.panel, marginLeft: 8 },
+  gearBtnBottomRight: {
+    position: 'absolute',
+    right: 14,
+    bottom: 12,
+    padding: 8,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+  },
   dropdownBox: {
     borderWidth: 1,
     borderColor: colors.border,
