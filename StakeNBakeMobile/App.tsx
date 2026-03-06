@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
-import { LAMPORTS_PER_SOL } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, StakeProgram } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { createConnection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
 import {
@@ -480,12 +480,23 @@ export default function App() {
       setBusy(true);
       setStatus('Checking stake account withdraw eligibility...');
 
-      const activation = await connection.getStakeActivation(asPublicKey(destination), 'confirmed');
-      if (activation.state !== 'inactive') {
-        throw new Error(`Stake account is ${activation.state}. Wait until it becomes inactive before withdrawing.`);
+      const stakePubkey = asPublicKey(destination);
+      const [activation, epochInfo, accountInfo] = await Promise.all([
+        connection.getStakeActivation(stakePubkey, 'confirmed'),
+        connection.getEpochInfo('confirmed'),
+        connection.getAccountInfo(stakePubkey, 'confirmed'),
+      ]);
+
+      if (!accountInfo) throw new Error('Stake account not found. Refresh and try again.');
+      if (!accountInfo.owner.equals(StakeProgram.programId)) {
+        throw new Error('Selected account is not a stake account.');
       }
 
-      const lamports = await connection.getBalance(asPublicKey(destination), 'confirmed');
+      if (activation.state !== 'inactive') {
+        throw new Error(`Stake account is ${activation.state} (epoch ${epochInfo.epoch}). Wait until inactive before withdrawing.`);
+      }
+
+      const lamports = accountInfo.lamports;
       if (lamports <= 0) throw new Error('No lamports available to withdraw from this stake account.');
 
       setStatus('Submitting withdraw transaction...');
