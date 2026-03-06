@@ -131,3 +131,27 @@ export async function buildDeactivateStakeTx(params: {
     })
   );
 }
+
+export async function buildWithdrawStakeTx(params: {
+  connection: Connection;
+  owner: PublicKey;
+  stakeAccount: PublicKey;
+  to: PublicKey;
+  lamports: number;
+}): Promise<Transaction> {
+  const { connection, owner, stakeAccount, to, lamports } = params;
+  const recent = await connection.getLatestBlockhash('confirmed');
+
+  return new Transaction({
+    feePayer: owner,
+    blockhash: recent.blockhash,
+    lastValidBlockHeight: recent.lastValidBlockHeight,
+  }).add(
+    StakeProgram.withdraw({
+      stakePubkey: stakeAccount,
+      authorizedPubkey: owner,
+      toPubkey: to,
+      lamports,
+    })
+  );
+}

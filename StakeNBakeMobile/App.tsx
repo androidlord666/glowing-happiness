@@ -22,6 +22,7 @@ import {
   buildConsolidationTransactions,
   buildCreateAndDelegateStakeTx,
   buildDeactivateStakeTx,
+  buildWithdrawStakeTx,
 } from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
@@ -470,6 +471,48 @@ export default function App() {
     }
   };
 
+  const onWithdraw = async () => {
+    if (busy) return;
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      if (!destination) throw new Error('Select a stake account first');
+
+      setBusy(true);
+      setStatus('Checking stake account withdraw eligibility...');
+
+      const activation = await connection.getStakeActivation(asPublicKey(destination), 'confirmed');
+      if (activation.state !== 'inactive') {
+        throw new Error(`Stake account is ${activation.state}. Wait until it becomes inactive before withdrawing.`);
+      }
+
+      const lamports = await connection.getBalance(asPublicKey(destination), 'confirmed');
+      if (lamports <= 0) throw new Error('No lamports available to withdraw from this stake account.');
+
+      setStatus('Submitting withdraw transaction...');
+      const tx = await buildWithdrawStakeTx({
+        connection,
+        owner: asPublicKey(wallet),
+        stakeAccount: asPublicKey(destination),
+        to: asPublicKey(wallet),
+        lamports,
+      });
+
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      if (sigs[0]) {
+        rememberTx(sigs[0]);
+        trackPendingTx(sigs[0], 'Withdraw transaction');
+        setStatus(`💸 Withdraw submitted for ${shortAddr(destination)}. Confirming...`);
+        await connection.confirmTransaction(sigs[0], 'confirmed');
+        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}.`);
+        await refreshSoon();
+      }
+    } catch (e: any) {
+      setStatus(actionError('Withdraw error', e));
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const onConsolidate = async () => {
     if (busy) return;
     try {
@@ -685,6 +728,7 @@ export default function App() {
             <View style={styles.row}>
               <ActionButton label={busy ? 'Staking…' : 'Create + Stake'} onPress={onCreateStake} />
               <ActionButton label={busy ? 'Unstaking…' : 'Unstake'} onPress={onUnstake} />
+              <ActionButton label={busy ? 'Withdrawing…' : 'Withdraw'} onPress={onWithdraw} />
             </View>
 
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
