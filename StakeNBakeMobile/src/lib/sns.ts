@@ -8,6 +8,10 @@ const SNS_FALLBACK_RPC_URLS = [
   'https://solana.publicnode.com',
 ];
 
+const SNS_HTTP_RESOLVERS = [
+  'https://sns-sdk-proxy.bonfida.workers.dev/resolve/',
+];
+
 async function loadSns() {
   if (snsMod) return snsMod;
   try {
@@ -16,6 +20,23 @@ async function loadSns() {
   } catch {
     return null;
   }
+}
+
+async function resolveViaHttpProxy(name: string): Promise<string> {
+  let lastErr: any;
+  for (const base of SNS_HTTP_RESOLVERS) {
+    try {
+      const res = await fetch(`${base}${encodeURIComponent(name)}`);
+      if (!res.ok) throw new Error(`http_${res.status}`);
+      const data: any = await res.json();
+      const candidate = data?.result ?? data?.address ?? data?.owner;
+      if (!candidate) throw new Error('empty_result');
+      return new PublicKey(candidate).toBase58();
+    } catch (e: any) {
+      lastErr = e;
+    }
+  }
+  throw lastErr ?? new Error('http_resolve_failed');
 }
 
 export async function resolveRecipientAddress(input: string, connection: Connection): Promise<string> {
@@ -49,6 +70,14 @@ export async function resolveRecipientAddress(input: string, connection: Connect
           lastErr = err;
         }
       }
+    }
+
+    // Fallback: SNS HTTP resolver proxy.
+    try {
+      const resolved = await resolveViaHttpProxy(v);
+      return new PublicKey(resolved).toBase58();
+    } catch (err: any) {
+      lastErr = err;
     }
 
     // Fallback: direct registry owner lookup.
