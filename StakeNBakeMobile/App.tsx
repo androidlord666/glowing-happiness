@@ -413,10 +413,10 @@ export default function App() {
             </View>
             <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
             {showExplorerOptions && (
-              <View style={styles.dropdownBox}>
-                <Text style={styles.dropdownItem} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
-                <Text style={styles.dropdownItem} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
-                <Text style={styles.dropdownItem} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
+              <View style={[styles.dropdownBox, theme === 'light' && styles.dropdownBoxLight]}>
+                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
+                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
+                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
               </View>
             )}
           </View>
@@ -424,8 +424,8 @@ export default function App() {
 
         <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={styles.label}>Wallet</Text>
-          <View style={styles.walletBox}>
-            <Text style={styles.walletText}>{shortAddr(wallet)}</Text>
+          <View style={[styles.walletBox, theme === 'light' && styles.walletBoxLight]}>
+            <Text style={[styles.walletText, theme === 'light' && styles.walletTextLight]}>{shortAddr(wallet)}</Text>
             <ActionButton label="Disconnect" onPress={disconnectWallet} />
           </View>
 
@@ -445,7 +445,7 @@ export default function App() {
             </View>
 
             <TextInput
-              style={styles.input}
+              style={[styles.input, theme === 'light' && styles.inputLight]}
               placeholder="Amount SOL to stake"
               placeholderTextColor={colors.muted}
               value={createStakeSol}
@@ -511,7 +511,7 @@ export default function App() {
           <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Send SOL (supports SNS .sol names)</Text>
             <TextInput
-              style={styles.input}
+              style={[styles.input, theme === 'light' && styles.inputLight]}
               placeholder="Recipient pubkey or name.sol"
               placeholderTextColor={colors.muted}
               value={sendTo}
@@ -528,7 +528,7 @@ export default function App() {
               </Text>
             )}
             <TextInput
-              style={styles.input}
+              style={[styles.input, theme === 'light' && styles.inputLight]}
               placeholder="Amount SOL"
               placeholderTextColor={colors.muted}
               value={sendSol}
@@ -605,6 +605,8 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   walletText: { color: colors.primary, fontWeight: '700' },
+  walletBoxLight: { backgroundColor: '#FFFFFF', borderColor: '#8ADFD3' },
+  walletTextLight: { color: '#072225' },
   validatorBox: {
     backgroundColor: '#0f0f16',
     borderColor: colors.secondary,
@@ -624,6 +626,11 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     color: colors.text,
   },
+  inputLight: {
+    backgroundColor: '#FFFFFF',
+    color: '#072225',
+    borderColor: '#8ADFD3',
+  },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   headerTitle: { flexShrink: 1, fontSize: 28 },
@@ -635,11 +642,18 @@ const styles = StyleSheet.create({
     paddingVertical: 6,
     backgroundColor: '#081416',
   },
+  dropdownBoxLight: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#8ADFD3',
+  },
   dropdownItem: {
     color: colors.text,
     paddingVertical: 8,
     paddingHorizontal: 12,
     fontWeight: '600',
+  },
+  dropdownItemLight: {
+    color: '#072225',
   },
   qrWrap: { alignItems: 'center', marginVertical: 8 },
   meta: { color: colors.muted },
