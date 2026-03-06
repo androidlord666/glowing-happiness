@@ -1,0 +1,9 @@
+# Copyright Notice
+
+© 2026 rasetsutekka. All rights reserved.
+
+"Staking with Solana Mobile", related branding, logos, and app assets are owned by rasetsutekka unless otherwise noted.
+
+Third-party libraries and dependencies used by this project remain the property of their respective owners and are governed by their own licenses.
+
+For copyright inquiries, contact the publisher via the support channel listed in the dApp Store profile.
