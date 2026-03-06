@@ -397,7 +397,7 @@ export default function App() {
       <Text style={styles.cornerSolanaS}>S</Text>
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.rowBetween}>
-          <Text style={[styles.title, { color: palette.text }]}>{APP_NAME}</Text>
+          <Text style={[styles.title, styles.headerTitle, { color: palette.text }]} numberOfLines={1}>{APP_NAME}</Text>
           <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtn}>
             <Text style={{ fontSize: 18 }}>⚙️</Text>
           </Pressable>
@@ -625,8 +625,9 @@ const styles = StyleSheet.create({
     color: colors.text,
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
-  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
-  gearBtn: { padding: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.panel },
+  rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
+  headerTitle: { flexShrink: 1, fontSize: 28 },
+  gearBtn: { padding: 8, borderRadius: 10, borderWidth: 1, borderColor: colors.border, backgroundColor: colors.panel, marginLeft: 8 },
   dropdownBox: {
     borderWidth: 1,
     borderColor: colors.border,
