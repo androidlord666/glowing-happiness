@@ -37,6 +37,8 @@ const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
 type Mode = 'stake' | 'send' | 'receive';
 type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
+type RpcHealth = 'healthy' | 'degraded';
+type SourceFilter = 'all' | 'mergeable' | 'high';
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -112,8 +114,12 @@ export default function App() {
   const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
   const [lastSignature, setLastSignature] = useState('');
+  const [txHistory, setTxHistory] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
+  const [rpcHealth, setRpcHealth] = useState<RpcHealth>('healthy');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
+  const [confirmConsolidate, setConfirmConsolidate] = useState(false);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
@@ -203,6 +209,17 @@ export default function App() {
     [stakeAccounts, destination]
   );
 
+  const filteredSourceStakeAccounts = useMemo(() => {
+    let items = [...sourceStakeAccounts];
+    if (sourceFilter === 'mergeable') {
+      items = items.filter((a) => a.lamports > 0);
+    }
+    if (sourceFilter === 'high') {
+      items.sort((a, b) => b.lamports - a.lamports);
+    }
+    return items;
+  }, [sourceStakeAccounts, sourceFilter]);
+
   const sourceSelectedKeys = useMemo(() => {
     const currentSources = new Set(sourceStakeAccounts.map((a) => a.pubkey));
     return Object.keys(selected).filter((k) => selected[k] && currentSources.has(k));
@@ -211,6 +228,24 @@ export default function App() {
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= 25;
+
+  const rememberTx = (sig: string) => {
+    setLastSignature(sig);
+    setTxHistory((prev) => [sig, ...prev.filter((s) => s !== sig)].slice(0, 5));
+  };
+
+  const refreshSoon = async (delayMs = 1200) => {
+    await new Promise<void>((resolve) => setTimeout(() => resolve(), delayMs));
+    await loadStakeAccounts();
+  };
+
+  const selectAllValidSources = () => {
+    const valid = filteredSourceStakeAccounts.slice(0, 25);
+    const next: Record<string, boolean> = {};
+    for (const a of valid) next[a.pubkey] = true;
+    setSelected(next);
+    setStatus(`Selected ${valid.length} source account(s).`);
+  };
 
   useEffect(() => {
     if (!wallet) return;
@@ -273,6 +308,7 @@ export default function App() {
         500
       );
 
+      setRpcHealth('healthy');
       lastStakeAccountsRef.current = items;
       setStakeAccounts(items);
       setSelected((prev) => {
@@ -292,11 +328,13 @@ export default function App() {
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
+        setRpcHealth('degraded');
         setStatus('rpc request cooldown 🙏😎');
         if (lastStakeAccountsRef.current.length) {
           setStakeAccounts(lastStakeAccountsRef.current);
         }
       } else {
+        setRpcHealth('degraded');
         setStatus(actionError('Refresh failed', e));
       }
     } finally {
@@ -330,13 +368,13 @@ export default function App() {
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
-        setLastSignature(sigs[0]);
+        rememberTx(sigs[0]);
         setStatus(`🛰️ Stake transaction submitted. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
       }
       setDestination(stakeAddress);
       setStatus(`✅ Staked ${createStakeSol} SOL to Solana Mobile validator.`);
-      await loadStakeAccounts();
+      await refreshSoon();
     } catch (e: any) {
       setStatus(actionError('Create+stake error', e));
     } finally {
@@ -359,10 +397,11 @@ export default function App() {
       });
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
-        setLastSignature(sigs[0]);
+        rememberTx(sigs[0]);
         setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}.`);
+        await refreshSoon();
       }
     } catch (e: any) {
       setStatus(actionError('Unstake error', e));
@@ -419,13 +458,13 @@ export default function App() {
         const out = await walletAdapter.signAndSendTransactions([txs[i]]);
         if (out[0]) {
           sigs.push(out[0]);
-          setLastSignature(out[0]);
+          rememberTx(out[0]);
         }
       }
 
       setSelected({});
       setStatus(`✅ Consolidation submitted (${sigs.length}/${txs.length} tx). Refreshing accounts...`);
-      await loadStakeAccounts();
+      await refreshSoon();
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
@@ -455,7 +494,7 @@ export default function App() {
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
-        setLastSignature(sigs[0]);
+        rememberTx(sigs[0]);
         setStatus(`🛰️ Transfer submitted. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
@@ -529,7 +568,9 @@ export default function App() {
           <Image source={theme === 'light' ? solanaMobileBlackLogo : solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · Mainnet</Text>
-
+        <Text style={[styles.rpcBadge, rpcHealth === 'degraded' && styles.rpcBadgeBad]}>
+          RPC: {rpcHealth === 'healthy' ? 'healthy' : 'degraded/fallback'}
+        </Text>
 
         <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Wallet</Text>
@@ -587,17 +628,21 @@ export default function App() {
               <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={() => loadStakeAccounts()} />
               <ActionButton
                 label={busy ? 'Consolidating…' : 'Consolidate'}
-                onPress={onConsolidate}
+                onPress={() => setConfirmConsolidate(true)}
                 disabled={!canConsolidate}
               />
             </View>
 
             <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
-            {sourceStakeAccounts.length === 0 && (
+            <View style={styles.row}>
+              <ActionButton label={`Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'all' ? 'mergeable' : f === 'mergeable' ? 'high' : 'all')} />
+              <ActionButton label="Select all valid" onPress={selectAllValidSources} disabled={busy || filteredSourceStakeAccounts.length === 0} />
+            </View>
+            {filteredSourceStakeAccounts.length === 0 && (
               <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>
             )}
-            {sourceStakeAccounts.map((a) => {
+            {filteredSourceStakeAccounts.map((a) => {
               const checked = !!selected[a.pubkey];
               return (
                 <Text
@@ -681,6 +726,17 @@ export default function App() {
             </Text>
           </View>
         )}
+
+        {txHistory.length > 0 && (
+          <View>
+            <Text style={styles.meta}>Recent transactions</Text>
+            {txHistory.map((sig, idx) => (
+              <Text key={sig} style={styles.link} onPress={() => Linking.openURL(txUrl(sig, cluster, explorer))}>
+                {idx + 1}. {shortAddr(sig)}
+              </Text>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       {showSettings && (
@@ -703,6 +759,27 @@ export default function App() {
 
         </View>
       )}
+
+      {confirmConsolidate && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.label}>Confirm consolidation</Text>
+            <Text style={styles.meta}>Destination: {shortAddr(destination)}</Text>
+            <Text style={styles.meta}>Sources: {selectedCount}</Text>
+            <View style={styles.row}>
+              <ActionButton label="Cancel" onPress={() => setConfirmConsolidate(false)} />
+              <ActionButton
+                label={busy ? 'Consolidating…' : 'Yes, consolidate'}
+                onPress={async () => {
+                  setConfirmConsolidate(false);
+                  await onConsolidate();
+                }}
+                disabled={busy}
+              />
+            </View>
+          </View>
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -713,6 +790,22 @@ const styles = StyleSheet.create({
   content: { padding: 20, gap: 14 },
   title: { fontSize: 32, fontWeight: '800', color: colors.text },
   subtitle: { color: colors.primary, marginBottom: 8, textAlign: 'center' },
+  rpcBadge: {
+    alignSelf: 'center',
+    color: '#072225',
+    backgroundColor: '#B8F6E8',
+    borderColor: '#5FDAC1',
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    borderRadius: 999,
+    fontSize: 12,
+    marginBottom: 4,
+  },
+  rpcBadgeBad: {
+    backgroundColor: '#FFD9D9',
+    borderColor: '#FF9B9B',
+  },
   splashLogo: { width: 320, height: 90 },
   bannerLogo: { width: '100%', height: 46, marginBottom: 6 },
 
@@ -830,4 +923,26 @@ const styles = StyleSheet.create({
   accountDestination: { color: colors.secondary },
   status: { color: colors.secondary, marginTop: 10 },
   link: { color: colors.primary, textDecorationLine: 'underline', marginTop: 6 },
+  confirmOverlay: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    bottom: 0,
+    backgroundColor: 'rgba(0,0,0,0.45)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    padding: 20,
+    zIndex: 50,
+  },
+  confirmCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#081416',
+    borderColor: colors.border,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
 });
