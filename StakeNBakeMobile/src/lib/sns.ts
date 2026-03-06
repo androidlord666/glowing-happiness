@@ -2,6 +2,12 @@ import { Connection, PublicKey } from '@solana/web3.js';
 
 let snsMod: any;
 
+const SNS_FALLBACK_RPC_URLS = [
+  'https://api.mainnet-beta.solana.com',
+  'https://rpc.ankr.com/solana',
+  'https://solana.publicnode.com',
+];
+
 async function loadSns() {
   if (snsMod) return snsMod;
   try {
@@ -35,12 +41,34 @@ export async function resolveRecipientAddress(input: string, connection: Connect
       ({ pubkey } = getDomainKeySync(v));
     }
 
-    const registry = await NameRegistryState.retrieve(connection, pubkey);
+    const tried: string[] = [];
+    const clients = [
+      connection,
+      ...SNS_FALLBACK_RPC_URLS.map((u) => new Connection(u, 'confirmed')),
+    ];
 
-    if (!registry?.registry?.owner) throw new Error('unregistered');
-    return new PublicKey(registry.registry.owner).toBase58();
+    let lastErr: any;
+    for (const client of clients) {
+      try {
+        tried.push((client as any)?._rpcEndpoint ?? 'unknown');
+        const registry = await NameRegistryState.retrieve(client, pubkey);
+        if (!registry?.registry?.owner) throw new Error('unregistered');
+        return new PublicKey(registry.registry.owner).toBase58();
+      } catch (err: any) {
+        lastErr = err;
+        const msg = String(err?.message ?? '').toLowerCase();
+        if (msg.includes('unregistered') || msg.includes('not found') || msg.includes('does not exist')) {
+          throw err;
+        }
+      }
+    }
+
+    throw lastErr ?? new Error(`SNS resolution failed after RPC fallbacks: ${tried.join(', ')}`);
   } catch (e: any) {
     const msg = String(e?.message ?? '').toLowerCase();
+    if (msg.includes('429') || msg.includes('too many requests')) {
+      throw new Error('SNS is temporarily rate-limited. Please wait a few moments and try again 🙏😎');
+    }
     if (msg.includes('unregistered') || msg.includes('not found') || msg.includes('does not exist')) {
       throw new Error(`SNS name not found: ${v}`);
     }
