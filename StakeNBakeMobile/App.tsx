@@ -381,11 +381,9 @@ export default function App() {
       <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: '#000' }]}> 
         <StatusBar barStyle={'light-content'} />
         <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
+          <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
           <Text style={[styles.title, { color: '#fff' }]}>{APP_NAME}</Text>
-          <View style={[styles.card, { width: '100%', backgroundColor: '#0A1A1E', borderColor: '#1A4548' }]}> 
-            <Image source={solanaMobileWhiteLogo} style={styles.bannerLogo} resizeMode="contain" />
-            <Text style={[styles.meta, { color: '#14F195' }]}>Network: {cluster}</Text>
-          </View>
+          <Text style={[styles.meta, { color: '#14F195', textAlign: 'center', marginBottom: 10 }]}>Network: {cluster}</Text>
           <Text style={[styles.subtitle, { color: '#14F195' }]}>Connect wallet to continue.</Text>
           <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
         </Animated.View>
