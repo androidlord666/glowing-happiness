@@ -8,6 +8,7 @@ const AUTH_WITHDRAWER_OFFSET = 44;
 export type StakeAccountInfo = {
   pubkey: string;
   lamports: number;
+  stakeState?: string;
 };
 
 export function createConnection(cluster: ClusterName): Connection {

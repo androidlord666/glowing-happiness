@@ -115,6 +115,7 @@ export default function App() {
   const [showQr, setShowQr] = useState(false);
   const [lastSignature, setLastSignature] = useState('');
   const [txHistory, setTxHistory] = useState<string[]>([]);
+  const [pendingTxs, setPendingTxs] = useState<Array<{ sig: string; label: string }>>([]);
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
   const [rpcHealth, setRpcHealth] = useState<RpcHealth>('healthy');
@@ -124,6 +125,7 @@ export default function App() {
   const landingFade = useState(new Animated.Value(0))[0];
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
   const lastRefreshAtRef = useRef(0);
+  const refreshMetricsRef = useRef({ count: 0, totalMs: 0 });
 
   const palette = theme === 'dark'
     ? colors
@@ -234,6 +236,13 @@ export default function App() {
     setTxHistory((prev) => [sig, ...prev.filter((s) => s !== sig)].slice(0, 5));
   };
 
+  const trackPendingTx = (sig: string, label: string) => {
+    setPendingTxs((prev) => {
+      if (prev.some((p) => p.sig === sig)) return prev;
+      return [...prev, { sig, label }];
+    });
+  };
+
   const refreshSoon = async (delayMs = 1200) => {
     await new Promise<void>((resolve) => setTimeout(() => resolve(), delayMs));
     await loadStakeAccounts();
@@ -255,6 +264,36 @@ export default function App() {
     loadStakeAccounts(wallet);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [cluster]);
+
+  useEffect(() => {
+    if (!pendingTxs.length) return;
+    const t = setInterval(async () => {
+      try {
+        const sigs = pendingTxs.map((p) => p.sig);
+        const st = await connection.getSignatureStatuses(sigs);
+        const done = new Set<string>();
+        st.value.forEach((v, i) => {
+          if (!v) return;
+          if (v.confirmationStatus === 'confirmed' || v.confirmationStatus === 'finalized') {
+            const meta = pendingTxs[i];
+            if (meta) {
+              done.add(meta.sig);
+              setStatus(`✅ ${meta.label} confirmed.`);
+              rememberTx(meta.sig);
+            }
+          }
+        });
+        if (done.size) {
+          setPendingTxs((prev) => prev.filter((p) => !done.has(p.sig)));
+          await refreshSoon(300);
+        }
+      } catch {
+        // no-op
+      }
+    }, 3500);
+
+    return () => clearInterval(t);
+  }, [pendingTxs, connection]);
 
   const connectWallet = async () => {
     if (busy) return;
@@ -280,6 +319,7 @@ export default function App() {
     setSelected({});
     setDestination('');
     setLastSignature('');
+    setPendingTxs([]);
     setStatus('Disconnected');
     setScreen('landing');
   };
@@ -301,6 +341,7 @@ export default function App() {
       lastRefreshAtRef.current = now;
       setBusy(true);
       setStatus('Refreshing stake accounts...');
+      const startedAt = Date.now();
 
       const items = await withRetries(
         () => fetchStakeAccounts(connection, activeWallet, cluster),
@@ -308,23 +349,38 @@ export default function App() {
         500
       );
 
+      const withState = await Promise.all(
+        items.map(async (a) => {
+          try {
+            const meta = await getStakeParsedMeta(connection, a.pubkey);
+            return { ...a, stakeState: meta.delegationState };
+          } catch {
+            return a;
+          }
+        })
+      );
+
+      const elapsed = Date.now() - startedAt;
+      refreshMetricsRef.current.count += 1;
+      refreshMetricsRef.current.totalMs += elapsed;
+
       setRpcHealth('healthy');
-      lastStakeAccountsRef.current = items;
-      setStakeAccounts(items);
+      lastStakeAccountsRef.current = withState;
+      setStakeAccounts(withState);
       setSelected((prev) => {
-        const valid = new Set(items.map((i) => i.pubkey));
+        const valid = new Set(withState.map((i) => i.pubkey));
         const next: Record<string, boolean> = {};
         for (const [k, v] of Object.entries(prev)) {
           if (v && valid.has(k)) next[k] = true;
         }
         return next;
       });
-      if (!items.length) {
+      if (!withState.length) {
         setDestination('');
-      } else if (!destination || !items.some((i) => i.pubkey === destination)) {
-        setDestination(items[0].pubkey);
+      } else if (!destination || !withState.some((i) => i.pubkey === destination)) {
+        setDestination(withState[0].pubkey);
       }
-      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
+      setStatus(withState.length ? `Loaded ${withState.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
@@ -369,6 +425,7 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
         rememberTx(sigs[0]);
+        trackPendingTx(sigs[0], 'Stake transaction');
         setStatus(`🛰️ Stake transaction submitted. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
       }
@@ -398,6 +455,7 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
         rememberTx(sigs[0]);
+        trackPendingTx(sigs[0], 'Unstake transaction');
         setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}.`);
@@ -459,6 +517,7 @@ export default function App() {
         if (out[0]) {
           sigs.push(out[0]);
           rememberTx(out[0]);
+          trackPendingTx(out[0], `Consolidation tx ${i + 1}/${txs.length}`);
         }
       }
 
@@ -495,6 +554,7 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
         rememberTx(sigs[0]);
+        trackPendingTx(sigs[0], 'Transfer transaction');
         setStatus(`🛰️ Transfer submitted. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
@@ -512,17 +572,38 @@ export default function App() {
     setStatus('Wallet address copied to clipboard.');
   };
 
+  const onSendMax = async () => {
+    try {
+      if (!wallet) throw new Error('Connect wallet first');
+      const balance = await connection.getBalance(asPublicKey(wallet), 'confirmed');
+      const reserve = 5000; // fee buffer
+      const lamports = Math.max(0, balance - reserve);
+      const sol = lamports / LAMPORTS_PER_SOL;
+      setSendSol(sol.toFixed(6));
+      setStatus('Set max amount (minus network fee buffer).');
+    } catch (e: any) {
+      setStatus(actionError('Max amount error', e));
+    }
+  };
+
   const copyDebugReport = () => {
+    const avgRefreshMs = refreshMetricsRef.current.count
+      ? Math.round(refreshMetricsRef.current.totalMs / refreshMetricsRef.current.count)
+      : null;
+
     const report = {
       app: 'stakeNbake',
       cluster,
       explorer,
       mode,
+      rpcHealth,
       wallet: wallet || null,
       destination: destination || null,
       stakeAccountCount: stakeAccounts.length,
       selectedSourceCount: selectedCount,
       lastSignature: lastSignature || null,
+      pendingTxCount: pendingTxs.length,
+      avgRefreshMs,
       status,
       timestamp: new Date().toISOString(),
     };
@@ -619,7 +700,7 @@ export default function App() {
                   style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
                   onPress={() => setDestination(a.pubkey)}
                 >
-                  {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
+                  {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
                 </Text>
               );
             })}
@@ -658,7 +739,7 @@ export default function App() {
                     setSelected(next);
                   }}
                 >
-                  {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
+                  {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
                 </Text>
               );
             })}
@@ -693,7 +774,10 @@ export default function App() {
               onChangeText={setSendSol}
               keyboardType="decimal-pad"
             />
-            <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
+            <View style={styles.row}>
+              <ActionButton label="Max" onPress={onSendMax} disabled={busy} />
+              <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
+            </View>
           </Animated.View>
         )}
 
