@@ -824,7 +824,7 @@ export default function App() {
         <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight, { color: palette.text }]}>Settings</Text>
           <View style={styles.row}>
-            <ActionButton label={'Network: Mainnet'} onPress={() => {}} />
+            <Text style={styles.meta}>Network: Mainnet</Text>
             <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
           </View>
           <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
