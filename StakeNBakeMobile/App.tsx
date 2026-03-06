@@ -378,7 +378,7 @@ export default function App() {
 
   if (screen === 'landing') {
     return (
-      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: '#000' }]}> 
+      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: '#000' }]}>
         <StatusBar barStyle={'light-content'} />
         <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
           <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
@@ -400,23 +400,6 @@ export default function App() {
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · Mainnet</Text>
 
-        {showSettings && (
-          <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-            <Text style={[styles.label, { color: palette.text }]}>Settings</Text>
-            <View style={styles.row}>
-              <ActionButton label={'Network: Mainnet'} onPress={() => {}} />
-              <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
-            </View>
-            <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
-            {showExplorerOptions && (
-              <View style={[styles.dropdownBox, theme === 'light' && styles.dropdownBoxLight]}>
-                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
-                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
-                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
-              </View>
-            )}
-          </View>
-        )}
 
         <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Wallet</Text>
@@ -562,6 +545,24 @@ export default function App() {
           </Text>
         )}
       </ScrollView>
+
+      {showSettings && (
+        <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+          <Text style={[styles.label, theme === 'light' && styles.labelLight, { color: palette.text }]}>Settings</Text>
+          <View style={styles.row}>
+            <ActionButton label={'Network: Mainnet'} onPress={() => {}} />
+            <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
+          </View>
+          <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
+          {showExplorerOptions && (
+            <View style={[styles.dropdownBox, theme === 'light' && styles.dropdownBoxLight]}>
+              <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
+              <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
+              <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
+            </View>
+          )}
+        </View>
+      )}
     </SafeAreaView>
   );
 }
@@ -648,6 +649,18 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
+    zIndex: 30,
+  },
+  settingsSheet: {
+    position: 'absolute',
+    left: 12,
+    right: 12,
+    bottom: 58,
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 12,
+    gap: 8,
+    zIndex: 20,
   },
   dropdownBox: {
     borderWidth: 1,
