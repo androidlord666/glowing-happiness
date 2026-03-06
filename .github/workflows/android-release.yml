@@ -108,6 +108,14 @@ jobs:
           unzip -l "$APK" | grep -q "assets/index.android.bundle"
           echo "✅ index.android.bundle found in release APK"
 
+      - name: Verify APK is non-debuggable release
+        run: |
+          APK="StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk"
+          if aapt dump badging "$APK" | grep -q "application-debuggable"; then
+            echo "❌ APK is debuggable; aborting release"
+            exit 1
+          fi
+          echo "✅ APK is non-debuggable"
       - name: Create checksum + versioned copies
         run: |
           APK_DIR="android/app/build/outputs/apk/release"
