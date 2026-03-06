@@ -540,9 +540,12 @@ export default function App() {
           <Text style={{ fontSize: 18 }}>⚙️</Text>
         </Pressable>
         {!!lastSignature && (
-          <Text style={styles.link} onPress={() => Linking.openURL(txUrl(lastSignature, cluster, explorer))}>
-            Open latest transaction on Solscan
-          </Text>
+          <View>
+            <Text style={styles.meta}>Latest tx: {shortAddr(lastSignature)}</Text>
+            <Text style={styles.link} onPress={() => Linking.openURL(txUrl(lastSignature, cluster, explorer))}>
+              Open latest transaction on {explorerLabel}
+            </Text>
+          </View>
         )}
       </ScrollView>
 
@@ -561,6 +564,7 @@ export default function App() {
               <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
             </View>
           )}
+
         </View>
       )}
     </SafeAreaView>
@@ -638,7 +642,7 @@ const styles = StyleSheet.create({
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  headerCenter: { alignItems: 'center', justifyContent: 'center', marginBottom: 4 },
+  headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 4 },
   headerLogo: { width: 240, height: 40 },
   gearBtnBottomRight: {
     position: 'absolute',
