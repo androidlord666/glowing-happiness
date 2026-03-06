@@ -396,7 +396,7 @@ export default function App() {
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
       <ScrollView contentContainerStyle={styles.content}>
         <View style={styles.headerCenter}>
-          <Image source={solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
+          <Image source={theme === 'light' ? solanaMobileBlackLogo : solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · Mainnet</Text>
 
@@ -435,8 +435,8 @@ export default function App() {
         {mode === 'stake' && (
           <Animated.View style={[styles.card, theme === 'light' && styles.stakeCardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Solana Mobile Staking</Text>
-            <View style={styles.validatorBox}>
-              <Text style={styles.validatorTitle}>Solana Mobile Validator</Text>
+            <View style={[styles.validatorBox, theme === 'dark' && styles.validatorBoxDarkHighlight]}>
+              <Text style={[styles.validatorTitle, theme === 'dark' && styles.validatorTitleDarkHighlight]}>Solana Mobile Validator</Text>
               <Text style={styles.validatorAddr}>{validatorVote}</Text>
             </View>
 
@@ -613,7 +613,12 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 6,
   },
+  validatorBoxDarkHighlight: {
+    backgroundColor: '#FFFFFF',
+    borderColor: '#8ADFD3',
+  },
   validatorTitle: { color: '#FFFFFF', fontWeight: '700' },
+  validatorTitleDarkHighlight: { color: '#072225' },
   validatorAddr: { color: colors.primary, fontSize: 12 },
   input: {
     backgroundColor: '#0f0f16',

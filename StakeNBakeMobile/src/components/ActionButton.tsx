@@ -18,8 +18,8 @@ export function ActionButton({ label, onPress }: { label: string; onPress: () =>
 
 const styles = StyleSheet.create({
   btn: {
-    backgroundColor: colors.panel,
-    borderColor: colors.border,
+    backgroundColor: '#14F195',
+    borderColor: '#00D7C8',
     borderWidth: 1,
     borderRadius: 12,
     paddingVertical: 10,
@@ -28,12 +28,12 @@ const styles = StyleSheet.create({
   },
   btnPressed: {
     transform: [{ scale: 0.98 }],
-    opacity: 0.86,
-    borderColor: colors.primary,
-    backgroundColor: '#0E2628',
+    opacity: 0.9,
+    borderColor: '#00B8AB',
+    backgroundColor: '#0AD7B8',
   },
   txt: {
-    color: colors.text,
-    fontWeight: '600',
+    color: '#072225',
+    fontWeight: '700',
   }
 });
