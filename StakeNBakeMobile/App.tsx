@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import {
   Linking,
   SafeAreaView,
@@ -62,6 +62,36 @@ function actionError(prefix: string, e: any): string {
   return `${prefix}: ${normalizeErrorMessage(e)}`;
 }
 
+async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
+  let lastError: any;
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await fn();
+    } catch (e: any) {
+      lastError = e;
+      if (attempt >= retries) break;
+      const delay = baseDelayMs * Math.pow(2, attempt);
+      await new Promise<void>((resolve) => setTimeout(() => resolve(), delay));
+    }
+  }
+  throw lastError;
+}
+
+type StakeParsedMeta = {
+  delegationVote?: string;
+  delegationState?: string;
+};
+
+async function getStakeParsedMeta(connection: any, account: string): Promise<StakeParsedMeta> {
+  const info = await connection.getParsedAccountInfo(asPublicKey(account), 'confirmed');
+  const parsed = (info.value?.data as any)?.parsed;
+  const stake = parsed?.info?.stake;
+  return {
+    delegationVote: stake?.delegation?.voter,
+    delegationState: parsed?.type,
+  };
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('splash');
   const [splashPhase, setSplashPhase] = useState<0 | 1>(0);
@@ -86,6 +116,8 @@ export default function App() {
   const [status, setStatus] = useState('Disconnected');
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
+  const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
+  const lastRefreshAtRef = useRef(0);
 
   const palette = theme === 'dark'
     ? colors
@@ -166,19 +198,19 @@ export default function App() {
     setSelected((prev) => ({ ...prev, [destination]: false }));
   }, [destination, selected]);
 
-  const sourceSelectedKeys = useMemo(() => {
-    const currentSources = new Set(
-      stakeAccounts
-        .filter((a) => a.pubkey !== destination)
-        .map((a) => a.pubkey)
-    );
+  const sourceStakeAccounts = useMemo(
+    () => stakeAccounts.filter((a) => a.pubkey !== destination),
+    [stakeAccounts, destination]
+  );
 
-    return Object.keys(selected).filter(
-      (k) => selected[k] && currentSources.has(k)
-    );
-  }, [selected, destination, stakeAccounts]);
+  const sourceSelectedKeys = useMemo(() => {
+    const currentSources = new Set(sourceStakeAccounts.map((a) => a.pubkey));
+    return Object.keys(selected).filter((k) => selected[k] && currentSources.has(k));
+  }, [selected, sourceStakeAccounts]);
+
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
+  const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= 25;
 
   useEffect(() => {
     if (!wallet) return;
@@ -220,9 +252,27 @@ export default function App() {
     try {
       const activeWallet = walletOverride ?? wallet;
       if (!activeWallet) throw new Error('Connect wallet first');
+
+      const now = Date.now();
+      if (!walletOverride && now - lastRefreshAtRef.current < 3500) {
+        setStatus('rpc request cooldown 🙏😎');
+        if (lastStakeAccountsRef.current.length) {
+          setStakeAccounts(lastStakeAccountsRef.current);
+        }
+        return;
+      }
+
+      lastRefreshAtRef.current = now;
       setBusy(true);
       setStatus('Refreshing stake accounts...');
-      const items = await fetchStakeAccounts(connection, activeWallet);
+
+      const items = await withRetries(
+        () => fetchStakeAccounts(connection, activeWallet),
+        2,
+        500
+      );
+
+      lastStakeAccountsRef.current = items;
       setStakeAccounts(items);
       setSelected((prev) => {
         const valid = new Set(items.map((i) => i.pubkey));
@@ -242,6 +292,9 @@ export default function App() {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
         setStatus('rpc request cooldown 🙏😎');
+        if (lastStakeAccountsRef.current.length) {
+          setStakeAccounts(lastStakeAccountsRef.current);
+        }
       } else {
         setStatus(actionError('Refresh failed', e));
       }
@@ -274,7 +327,11 @@ export default function App() {
       });
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      if (sigs[0]) setLastSignature(sigs[0]);
+      if (sigs[0]) {
+        setLastSignature(sigs[0]);
+        setStatus(`🛰️ Stake transaction submitted. Confirming...`);
+        await connection.confirmTransaction(sigs[0], 'confirmed');
+      }
       setDestination(stakeAddress);
       setStatus(`✅ Staked ${createStakeSol} SOL to Solana Mobile validator.`);
       await loadStakeAccounts();
@@ -298,8 +355,12 @@ export default function App() {
         stakeAccount: asPublicKey(destination),
       });
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}.`);
+      if (sigs[0]) {
+        setLastSignature(sigs[0]);
+        setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}. Confirming...`);
+        await connection.confirmTransaction(sigs[0], 'confirmed');
+        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}.`);
+      }
     } catch (e: any) {
       setStatus(actionError('Unstake error', e));
     } finally {
@@ -311,16 +372,32 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select destination stake account from list below');
-      const availableSourceCount = stakeAccounts.filter((a) => a.pubkey !== destination).length;
+      const availableSourceCount = sourceStakeAccounts.length;
       if (availableSourceCount < 1) {
         throw new Error('Need at least 2 stake accounts. Create another stake account, then select source account(s).');
       }
 
-      const sources = sourceSelectedKeys.map(asPublicKey);
-      if (sources.length === 0) throw new Error('Select at least one source stake account below.');
-      if (sources.length > 25) throw new Error('Max 25 source stake accounts');
+      if (sourceSelectedKeys.length === 0) throw new Error('Select at least one source stake account below.');
+      if (sourceSelectedKeys.length > 25) throw new Error('Max 25 source stake accounts');
 
       setBusy(true);
+      setStatus('Validating merge eligibility...');
+
+      const [destMeta, ...sourceMeta] = await Promise.all([
+        getStakeParsedMeta(connection, destination),
+        ...sourceSelectedKeys.map((k) => getStakeParsedMeta(connection, k)),
+      ]);
+
+      const incompatible = sourceMeta.find((m) => {
+        if (!destMeta.delegationVote || !m.delegationVote) return false;
+        return m.delegationVote !== destMeta.delegationVote;
+      });
+
+      if (incompatible) {
+        throw new Error('Selected source account has different delegated validator than destination.');
+      }
+
+      const sources = sourceSelectedKeys.map(asPublicKey);
       setStatus('Building consolidation transactions...');
       const txs = await buildConsolidationTransactions({
         connection,
@@ -332,10 +409,18 @@ export default function App() {
         },
       });
 
-      const sigs = await walletAdapter.signAndSendTransactions(txs);
-      if (sigs[0]) setLastSignature(sigs[0]);
+      const sigs: string[] = [];
+      for (let i = 0; i < txs.length; i++) {
+        setStatus(`Submitting consolidation tx ${i + 1}/${txs.length}...`);
+        const out = await walletAdapter.signAndSendTransactions([txs[i]]);
+        if (out[0]) {
+          sigs.push(out[0]);
+          setLastSignature(out[0]);
+        }
+      }
+
       setSelected({});
-      setStatus(`✅ Consolidation submitted (${sigs.length} tx). Refreshing accounts...`);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txs.length} tx). Refreshing accounts...`);
       await loadStakeAccounts();
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
@@ -364,8 +449,12 @@ export default function App() {
       });
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
+      if (sigs[0]) {
+        setLastSignature(sigs[0]);
+        setStatus(`🛰️ Transfer submitted. Confirming...`);
+        await connection.confirmTransaction(sigs[0], 'confirmed');
+        setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
+      }
     } catch (e: any) {
       setStatus(actionError('Send error', e));
     } finally {
@@ -472,15 +561,19 @@ export default function App() {
 
             <View style={styles.row}>
               <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={() => loadStakeAccounts()} />
-              <ActionButton label={busy ? 'Consolidating…' : 'Consolidate'} onPress={onConsolidate} />
+              <ActionButton
+                label={busy ? 'Consolidating…' : 'Consolidate'}
+                onPress={onConsolidate}
+                disabled={!canConsolidate}
+              />
             </View>
 
             <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
-            {stakeAccounts.filter((a) => a.pubkey !== destination).length === 0 && (
+            {sourceStakeAccounts.length === 0 && (
               <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>
             )}
-            {stakeAccounts.filter((a) => a.pubkey !== destination).map((a) => {
+            {sourceStakeAccounts.map((a) => {
               const checked = !!selected[a.pubkey];
               return (
                 <Text

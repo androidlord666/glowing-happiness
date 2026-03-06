@@ -1,17 +1,26 @@
 import React from 'react';
 import { Pressable, StyleSheet, Text } from 'react-native';
-import { colors } from '../theme/colors';
 
-export function ActionButton({ label, onPress }: { label: string; onPress: () => void }) {
+export function ActionButton({
+  label,
+  onPress,
+  disabled,
+}: {
+  label: string;
+  onPress: () => void;
+  disabled?: boolean;
+}) {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.btn,
-        pressed && styles.btnPressed,
+        disabled && styles.btnDisabled,
+        pressed && !disabled && styles.btnPressed,
       ]}
       onPress={onPress}
+      disabled={disabled}
     >
-      <Text style={styles.txt}>{label}</Text>
+      <Text style={[styles.txt, disabled && styles.txtDisabled]}>{label}</Text>
     </Pressable>
   );
 }
@@ -32,8 +41,16 @@ const styles = StyleSheet.create({
     borderColor: '#00B8AB',
     backgroundColor: '#0AD7B8',
   },
+  btnDisabled: {
+    backgroundColor: '#9EEBDD',
+    borderColor: '#8EDACE',
+    opacity: 0.7,
+  },
   txt: {
     color: '#072225',
     fontWeight: '700',
-  }
+  },
+  txtDisabled: {
+    color: '#3A5B56',
+  },
 });
