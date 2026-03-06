@@ -383,7 +383,7 @@ export default function App() {
         <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
           <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
           <Text style={[styles.title, { color: '#fff' }]}>{APP_NAME}</Text>
-          <Text style={[styles.meta, { color: '#14F195', textAlign: 'center', marginBottom: 10 }]}>Network: {cluster}</Text>
+          <Text style={[styles.meta, { color: '#14F195', textAlign: 'center', marginBottom: 10 }]}>Network: Mainnet</Text>
           <Text style={[styles.subtitle, { color: '#14F195' }]}>Connect wallet to continue.</Text>
           <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
         </Animated.View>
@@ -402,13 +402,13 @@ export default function App() {
             <Text style={{ fontSize: 18 }}>⚙️</Text>
           </Pressable>
         </View>
-        <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · {cluster}</Text>
+        <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · Mainnet</Text>
 
         {showSettings && (
           <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
             <Text style={[styles.label, { color: palette.text }]}>Settings</Text>
             <View style={styles.row}>
-              <ActionButton label={`Network: ${cluster === 'devnet' ? 'Devnet' : 'Mainnet'}`} onPress={() => setCluster((c) => c === 'devnet' ? 'mainnet-beta' : 'devnet')} />
+              <ActionButton label={'Network: Mainnet'} onPress={() => {}} />
               <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
             </View>
             <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
