@@ -241,7 +241,7 @@ export default function App() {
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
-        setStatus('Please wait a few moments to refresh 🙏😎');
+        setStatus('rpc request cooldown 🙏😎');
       } else {
         setStatus(actionError('Refresh failed', e));
       }
