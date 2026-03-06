@@ -419,7 +419,7 @@ export default function App() {
         )}
 
         <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
-          <Text style={styles.label}>Wallet</Text>
+          <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Wallet</Text>
           <View style={[styles.walletBox, theme === 'light' && styles.walletBoxLight]}>
             <Text style={[styles.walletText, theme === 'light' && styles.walletTextLight]}>{shortAddr(wallet)}</Text>
             <ActionButton label="Disconnect" onPress={disconnectWallet} />
@@ -434,7 +434,7 @@ export default function App() {
 
         {mode === 'stake' && (
           <Animated.View style={[styles.card, theme === 'light' && styles.stakeCardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
-            <Text style={styles.label}>Solana Mobile Staking</Text>
+            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Solana Mobile Staking</Text>
             <View style={[styles.validatorBox, theme === 'dark' && styles.validatorBoxDarkHighlight]}>
               <Text style={[styles.validatorTitle, theme === 'dark' && styles.validatorTitleDarkHighlight]}>Solana Mobile Validator</Text>
               <Text style={styles.validatorAddr}>{validatorVote}</Text>
@@ -453,7 +453,7 @@ export default function App() {
               <ActionButton label={busy ? 'Unstaking…' : 'Unstake'} onPress={onUnstake} />
             </View>
 
-            <Text style={styles.label}>Consolidate existing stake accounts</Text>
+            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!stakeAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
@@ -505,7 +505,7 @@ export default function App() {
 
         {mode === 'send' && (
           <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
-            <Text style={styles.label}>Send SOL (supports SNS .sol names)</Text>
+            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Send SOL (supports SNS .sol names)</Text>
             <TextInput
               style={[styles.input, theme === 'light' && styles.inputLight]}
               placeholder="Recipient pubkey or name.sol"
@@ -537,7 +537,7 @@ export default function App() {
 
         {mode === 'receive' && (
           <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
-            <Text style={styles.label}>Receive</Text>
+            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Receive</Text>
             <View style={styles.row}>
               <ActionButton label="Copy Address" onPress={copyWalletAddress} />
               <ActionButton label={showQr ? 'Hide QR' : 'Show QR'} onPress={() => setShowQr((v) => !v)} />
@@ -592,6 +592,7 @@ const styles = StyleSheet.create({
     borderColor: '#8ADFD3',
   },
   label: { color: colors.text, fontWeight: '700' },
+  labelLight: { color: '#072225' },
   walletBox: {
     backgroundColor: '#0f0f16',
     borderColor: colors.primary,
