@@ -100,7 +100,7 @@ jobs:
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew clean :app:bundleReleaseJsAndAssets :app:assembleRelease --no-daemon
+          ./gradlew clean :app:createBundleReleaseJsAndAssets :app:assembleRelease --no-daemon
 
       - name: Verify JS bundle is packaged in APK
         run: |
