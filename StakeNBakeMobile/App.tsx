@@ -445,7 +445,7 @@ export default function App() {
               return (
                 <Text
                   key={`dest-${a.pubkey}`}
-                  style={[styles.account, isDest && styles.accountDestination]}
+                  style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
                   onPress={() => setDestination(a.pubkey)}
                 >
                   {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports
@@ -468,7 +468,7 @@ export default function App() {
               return (
                 <Text
                   key={`src-${a.pubkey}`}
-                  style={[styles.account, checked && styles.accountSelected]}
+                  style={[styles.account, checked && styles.accountSelected, theme === 'light' && styles.accountLight]}
                   onPress={() => {
                     const next = { ...selected };
                     if (!checked && selectedCount >= 25) {
@@ -685,6 +685,7 @@ const styles = StyleSheet.create({
   qrWrap: { alignItems: 'center', marginVertical: 8 },
   meta: { color: colors.muted },
   account: { color: colors.text, paddingVertical: 6 },
+  accountLight: { color: '#072225' },
   accountSelected: { color: colors.primary },
   accountDestination: { color: colors.secondary },
   status: { color: colors.secondary, marginTop: 10 },
