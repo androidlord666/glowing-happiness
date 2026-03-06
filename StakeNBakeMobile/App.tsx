@@ -40,6 +40,8 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
+const MAX_SOURCE_ACCOUNTS = 99;
+
 function shortAddr(v: string) {
   if (!v) return '';
   return `${v.slice(0, 6)}...${v.slice(-6)}`;
@@ -229,7 +231,7 @@ export default function App() {
 
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
-  const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= 25;
+  const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
 
   const rememberTx = (sig: string) => {
     setLastSignature(sig);
@@ -249,7 +251,7 @@ export default function App() {
   };
 
   const selectAllValidSources = () => {
-    const valid = filteredSourceStakeAccounts.slice(0, 25);
+    const valid = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
     const next: Record<string, boolean> = {};
     for (const a of valid) next[a.pubkey] = true;
     setSelected(next);
@@ -479,7 +481,7 @@ export default function App() {
       }
 
       if (sourceSelectedKeys.length === 0) throw new Error('Select at least one source stake account below.');
-      if (sourceSelectedKeys.length > 25) throw new Error('Max 25 source stake accounts');
+      if (sourceSelectedKeys.length > MAX_SOURCE_ACCOUNTS) throw new Error(`Max ${MAX_SOURCE_ACCOUNTS} source stake accounts`);
 
       setBusy(true);
       setStatus('Validating merge eligibility...');
@@ -712,7 +714,7 @@ export default function App() {
             </View>
 
             <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
-            <Text style={styles.meta}>Selected source accounts: {selectedCount}/25</Text>
+            <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
             <View style={styles.row}>
               <ActionButton label={`Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'all' ? 'mergeable' : f === 'mergeable' ? 'high' : 'all')} />
               <ActionButton label="Select all valid" onPress={selectAllValidSources} disabled={busy || filteredSourceStakeAccounts.length === 0} />
@@ -728,8 +730,8 @@ export default function App() {
                   style={[styles.account, checked && styles.accountSelected, theme === 'light' && styles.accountLight]}
                   onPress={() => {
                     const next = { ...selected };
-                    if (!checked && selectedCount >= 25) {
-                      setStatus('Maximum 25 source stake accounts.');
+                    if (!checked && selectedCount >= MAX_SOURCE_ACCOUNTS) {
+                      setStatus(`Maximum ${MAX_SOURCE_ACCOUNTS} source stake accounts.`);
                       return;
                     }
                     next[a.pubkey] = !checked;
