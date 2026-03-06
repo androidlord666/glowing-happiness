@@ -166,10 +166,17 @@ export default function App() {
     setSelected((prev) => ({ ...prev, [destination]: false }));
   }, [destination, selected]);
 
-  const sourceSelectedKeys = useMemo(
-    () => Object.keys(selected).filter((k) => selected[k] && k !== destination),
-    [selected, destination]
-  );
+  const sourceSelectedKeys = useMemo(() => {
+    const currentSources = new Set(
+      stakeAccounts
+        .filter((a) => a.pubkey !== destination)
+        .map((a) => a.pubkey)
+    );
+
+    return Object.keys(selected).filter(
+      (k) => selected[k] && currentSources.has(k)
+    );
+  }, [selected, destination, stakeAccounts]);
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
 
@@ -217,6 +224,14 @@ export default function App() {
       setStatus('Refreshing stake accounts...');
       const items = await fetchStakeAccounts(connection, activeWallet);
       setStakeAccounts(items);
+      setSelected((prev) => {
+        const valid = new Set(items.map((i) => i.pubkey));
+        const next: Record<string, boolean> = {};
+        for (const [k, v] of Object.entries(prev)) {
+          if (v && valid.has(k)) next[k] = true;
+        }
+        return next;
+      });
       if (!items.length) {
         setDestination('');
       } else if (!destination || !items.some((i) => i.pubkey === destination)) {
@@ -319,7 +334,9 @@ export default function App() {
 
       const sigs = await walletAdapter.signAndSendTransactions(txs);
       if (sigs[0]) setLastSignature(sigs[0]);
-      setStatus(`✅ Consolidation submitted (${sigs.length} tx).`);
+      setSelected({});
+      setStatus(`✅ Consolidation submitted (${sigs.length} tx). Refreshing accounts...`);
+      await loadStakeAccounts();
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
