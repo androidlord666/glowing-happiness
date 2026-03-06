@@ -2,5 +2,7 @@ node_modules/
 android/.gradle/
 android/app/build/
 *.keystore
+*.jks
+**/keystore.properties
 .env
 .DS_Store
