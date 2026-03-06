@@ -96,21 +96,17 @@ jobs:
           echo "Resolved version lines:"
           grep -E "versionCode|versionName" "$FILE"
 
-      - name: Bundle React Native JS for release
-        run: |
-          mkdir -p android/app/src/main/assets
-          npx react-native bundle \
-            --platform android \
-            --dev false \
-            --entry-file index.js \
-            --bundle-output android/app/src/main/assets/index.android.bundle \
-            --assets-dest android/app/src/main/res
-
-      - name: Build release APK
+      - name: Build release APK (force bundled JS)
         run: |
           cd android
           chmod +x gradlew
-          ./gradlew assembleRelease --no-daemon
+          ./gradlew clean :app:bundleReleaseJsAndAssets :app:assembleRelease --no-daemon
+
+      - name: Verify JS bundle is packaged in APK
+        run: |
+          APK="StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk"
+          unzip -l "$APK" | grep -q "assets/index.android.bundle"
+          echo "✅ index.android.bundle found in release APK"
 
       - name: Create checksum + versioned copies
         run: |
