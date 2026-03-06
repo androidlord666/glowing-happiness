@@ -433,7 +433,7 @@ export default function App() {
         </View>
 
         {mode === 'stake' && (
-          <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
+          <Animated.View style={[styles.card, theme === 'light' && styles.stakeCardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Solana Mobile Staking</Text>
             <View style={styles.validatorBox}>
               <Text style={styles.validatorTitle}>Solana Mobile Validator</Text>
@@ -504,7 +504,7 @@ export default function App() {
         )}
 
         {mode === 'send' && (
-          <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
+          <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Send SOL (supports SNS .sol names)</Text>
             <TextInput
               style={[styles.input, theme === 'light' && styles.inputLight]}
@@ -536,7 +536,7 @@ export default function App() {
         )}
 
         {mode === 'receive' && (
-          <Animated.View style={[styles.card, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
+          <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={styles.label}>Receive</Text>
             <View style={styles.row}>
               <ActionButton label="Copy Address" onPress={copyWalletAddress} />
@@ -583,6 +583,14 @@ const styles = StyleSheet.create({
     padding: 14,
     gap: 10,
   },
+  cardLight: {
+    backgroundColor: '#DDF7F1',
+    borderColor: '#8ADFD3',
+  },
+  stakeCardLight: {
+    backgroundColor: '#DDF7F1',
+    borderColor: '#8ADFD3',
+  },
   label: { color: colors.text, fontWeight: '700' },
   walletBox: {
     backgroundColor: '#0f0f16',
@@ -595,7 +603,7 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   walletText: { color: colors.primary, fontWeight: '700' },
-  walletBoxLight: { backgroundColor: '#FFFFFF', borderColor: '#8ADFD3' },
+  walletBoxLight: { backgroundColor: '#DDF7F1', borderColor: '#8ADFD3' },
   walletTextLight: { color: '#072225' },
   validatorBox: {
     backgroundColor: '#0f0f16',
@@ -605,7 +613,7 @@ const styles = StyleSheet.create({
     padding: 10,
     gap: 6,
   },
-  validatorTitle: { color: colors.text, fontWeight: '700' },
+  validatorTitle: { color: '#FFFFFF', fontWeight: '700' },
   validatorAddr: { color: colors.primary, fontSize: 12 },
   input: {
     backgroundColor: '#0f0f16',
