@@ -49,6 +49,7 @@ type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
+type ConsolidationSendMode = 'sequential' | 'batch';
 
 const APP_VERSION_LABEL = 'v2.39 (code 50)';
 const MAX_SOURCE_ACCOUNTS = 99;
@@ -230,6 +231,7 @@ export default function App() {
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
+  const [consolidationSendMode, setConsolidationSendMode] = useState<ConsolidationSendMode>('sequential');
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
@@ -410,6 +412,7 @@ export default function App() {
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
+  const estimatedMergeTxCount = selectedCount + (destination && !isDelegatedState(destinationState) ? 1 : 0);
   const consolidationFeeSkrText = consolidationFeeSkr.toFixed(2);
   const pendingTxSet = useMemo(() => new Set(pendingTxs.map((p) => p.sig)), [pendingTxs]);
 
@@ -836,6 +839,7 @@ export default function App() {
         },
       });
 
+      const delegateTx = includeDelegateTx ? txs[0] : null;
       const mergeTxCandidates = includeDelegateTx ? txs.slice(1) : txs;
       if (mergeTxCandidates.length === 0) {
         throw new Error('No merge transactions were created.');
@@ -861,39 +865,12 @@ export default function App() {
       const mergeTxsToSend = preflightValid.length ? preflightValid : mergeTxCandidates;
       const skippedByPreflight = preflight.length - preflightValid.length;
 
-      const submittedMergeSigs: string[] = [];
-      let failedMergeCount = 0;
-      for (let i = 0; i < mergeTxsToSend.length; i++) {
-        const tx = mergeTxsToSend[i];
-        try {
-          const recent = await connection.getLatestBlockhash('confirmed');
-          tx.recentBlockhash = recent.blockhash;
-          tx.lastValidBlockHeight = recent.lastValidBlockHeight;
-          tx.feePayer = owner;
-
-          setStatus(`Submitting consolidation tx ${i + 1}/${mergeTxsToSend.length}...`);
-          const sigs = await walletAdapter.signAndSendTransactions([tx]);
-          const sig = sigs[0];
-          if (!sig) throw new Error('wallet returned empty signature');
-          rememberTx(sig);
-          trackPendingTx(sig, `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`);
-          await connection.confirmTransaction(sig, 'confirmed');
-          submittedMergeSigs.push(sig);
-        } catch (e: any) {
-          if (classifyError(e) === 'user') throw e;
-          failedMergeCount += 1;
-        }
-      }
-
-      if (submittedMergeSigs.length === 0) {
-        throw new Error('No consolidation transaction was confirmed. Refresh and try smaller batches.');
-      }
-
-      let feeSig = '';
       const chargedFeeSkr = FEATURE_FEE_ENABLED
-        ? Math.min(submittedMergeSigs.length * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
+        ? Math.min(mergeTxsToSend.length * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
         : 0;
 
+      // Fee must be paid for every consolidation run; enforce this before merge submission.
+      let feeSig = '';
       if (chargedFeeSkr > 0) {
         const mint = asPublicKey(SKR_MINT);
         const feeWallet = asPublicKey(PLATFORM_FEE_WALLET);
@@ -952,14 +929,88 @@ export default function App() {
           throw new Error(`Fee transaction simulation failed: ${JSON.stringify(feeSim.value.err)}`);
         }
 
-        setStatus('Submitting platform fee transaction...');
+        setStatus('Submitting required platform fee transaction...');
         const feeSigs = await walletAdapter.signAndSendTransactions([feeTx]);
         feeSig = feeSigs[0] ?? '';
-        if (feeSig) {
-          rememberTx(feeSig);
-          trackPendingTx(feeSig, 'Platform fee transaction (SKR)');
-          await connection.confirmTransaction(feeSig, 'confirmed');
+        if (!feeSig) throw new Error('Fee transaction was not signed/submitted. Consolidation aborted.');
+        rememberTx(feeSig);
+        trackPendingTx(feeSig, 'Platform fee transaction (SKR)');
+        await connection.confirmTransaction(feeSig, 'confirmed');
+      }
+
+      if (delegateTx) {
+        const recent = await connection.getLatestBlockhash('confirmed');
+        delegateTx.recentBlockhash = recent.blockhash;
+        delegateTx.lastValidBlockHeight = recent.lastValidBlockHeight;
+        delegateTx.feePayer = owner;
+        setStatus('Submitting destination delegate transaction...');
+        const sigs = await walletAdapter.signAndSendTransactions([delegateTx]);
+        const sig = sigs[0];
+        if (!sig) throw new Error('Destination delegate transaction was not signed/submitted.');
+        rememberTx(sig);
+        trackPendingTx(sig, 'Destination delegate transaction');
+        await connection.confirmTransaction(sig, 'confirmed');
+      }
+
+      const submittedMergeSigs: string[] = [];
+      let failedMergeCount = 0;
+      if (consolidationSendMode === 'batch') {
+        const batchTxs = await Promise.all(
+          mergeTxsToSend.map(async (tx) => {
+            const recent = await connection.getLatestBlockhash('confirmed');
+            tx.recentBlockhash = recent.blockhash;
+            tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+            tx.feePayer = owner;
+            return tx;
+          })
+        );
+        setStatus(`Submitting consolidation batch (${batchTxs.length} tx)...`);
+        const sigs = await walletAdapter.signAndSendTransactions(batchTxs);
+        for (let i = 0; i < batchTxs.length; i++) {
+          const sig = sigs[i];
+          if (!sig) {
+            failedMergeCount += 1;
+            continue;
+          }
+          rememberTx(sig);
+          trackPendingTx(sig, `Consolidation tx ${i + 1}/${batchTxs.length}`);
+          submittedMergeSigs.push(sig);
         }
+        await Promise.all(
+          submittedMergeSigs.map(async (sig) => {
+            try {
+              await connection.confirmTransaction(sig, 'confirmed');
+            } catch {
+              // confirmation can lag; submitted signatures still prove signing success
+            }
+          })
+        );
+      } else {
+        for (let i = 0; i < mergeTxsToSend.length; i++) {
+          const tx = mergeTxsToSend[i];
+          try {
+            const recent = await connection.getLatestBlockhash('confirmed');
+            tx.recentBlockhash = recent.blockhash;
+            tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+            tx.feePayer = owner;
+
+            setStatus(`Submitting consolidation tx ${i + 1}/${mergeTxsToSend.length}...`);
+            const sigs = await walletAdapter.signAndSendTransactions([tx]);
+            const sig = sigs[0];
+            if (!sig) throw new Error('wallet returned empty signature');
+            rememberTx(sig);
+            trackPendingTx(sig, `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`);
+            await connection.confirmTransaction(sig, 'confirmed');
+            submittedMergeSigs.push(sig);
+          } catch (e: any) {
+            if (classifyError(e) === 'user') throw e;
+            failedMergeCount += 1;
+          }
+        }
+      }
+
+      if (submittedMergeSigs.length === 0) {
+        throw new Error('No consolidation transactions were signed/submitted.');
       }
 
       setSelected({});
@@ -969,7 +1020,7 @@ export default function App() {
       if (preflightValid.length && skippedByPreflight) notes.push(`skipped ${skippedByPreflight} preflight-failed`);
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
-      setStatus(`✅ Consolidation confirmed (${submittedMergeSigs.length} merge tx${feeSig ? ' + fee tx' : ''}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
+      setStatus(`✅ Consolidation submitted (${submittedMergeSigs.length} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
@@ -1220,6 +1271,7 @@ export default function App() {
       pendingTxCount: pendingTxs.length,
       avgRefreshMs,
       status,
+      consolidationSendMode,
       timestamp: new Date().toISOString(),
     };
 
@@ -1243,6 +1295,7 @@ export default function App() {
         collector: PLATFORM_FEE_WALLET,
       },
       status,
+      consolidationSendMode,
       lastSignature,
       recentTxs: txHistory,
       wallet,
@@ -1620,6 +1673,12 @@ export default function App() {
           )}
 
           <ActionButton label="What's New" onPress={() => setShowWhatsNew(true)} />
+          <ActionButton
+            label={`Consolidation Mode: ${consolidationSendMode === 'sequential' ? 'Sequential' : 'Batch'}`}
+            onPress={() =>
+              setConsolidationSendMode((m) => (m === 'sequential' ? 'batch' : 'sequential'))
+            }
+          />
           <ActionButton label="Quick Tips" onPress={() => setShowTips(true)} />
           <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
           <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
@@ -1638,7 +1697,8 @@ export default function App() {
             <Text style={styles.meta}>Sources: {selectedCount}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only)</Text>
             <Text style={styles.meta}>Fee wallet: {shortAddr(PLATFORM_FEE_WALLET)}</Text>
-            <Text style={styles.meta}>Breakdown: merge txs {selectedCount + 1} + fee tx 1</Text>
+            <Text style={styles.meta}>Mode: {consolidationSendMode === 'sequential' ? 'Sequential' : 'Batch'}</Text>
+            <Text style={styles.meta}>Breakdown: fee tx 1 + merge txs {estimatedMergeTxCount}</Text>
             <Text style={styles.meta}>No hidden fees.</Text>
             <View style={styles.row}>
               <ActionButton label="Cancel" onPress={() => setConfirmConsolidate(false)} />
