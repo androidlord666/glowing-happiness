@@ -51,7 +51,7 @@ type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 type ConsolidationSendMode = 'sequential' | 'batch';
 
-const APP_VERSION_LABEL = 'v2.39 (code 50)';
+const APP_VERSION_LABEL = 'v2.40 (code 51)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
