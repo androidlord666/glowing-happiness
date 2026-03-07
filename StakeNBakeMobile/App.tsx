@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
-const APP_VERSION_LABEL = 'v2.10 (code 21)';
+const APP_VERSION_LABEL = 'v2.13 (code 24)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -57,8 +57,8 @@ const FEATURE_WITHDRAW_ENABLED = true;
 
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
-const PLATFORM_FEE_PER_SOURCE_SKR = 25;
-const PLATFORM_FEE_CAP_SKR = 250;
+const PLATFORM_FEE_PER_SOURCE_SKR = 10;
+const PLATFORM_FEE_CAP_SKR = 100;
 
 function shortAddr(v: string) {
   if (!v) return '';
