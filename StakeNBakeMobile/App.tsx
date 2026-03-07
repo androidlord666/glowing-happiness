@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.19 (code 30)';
+const APP_VERSION_LABEL = 'v2.20 (code 31)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -1013,7 +1013,7 @@ export default function App() {
         <View style={styles.headerCenter}>
           <Image source={theme === 'light' ? solanaMobileBlackLogo : solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
         </View>
-        <Text style={[styles.subtitle, { color: palette.primary }]}>Solana Mobile · Mainnet</Text>
+        <Text style={[styles.subtitle, { color: palette.primary }]}>Mainnet</Text>
         <Text style={[styles.rpcBadge, rpcHealth === 'degraded' && styles.rpcBadgeBad]}>
           RPC: {rpcHealth === 'healthy' ? 'healthy' : 'degraded/fallback'}
         </Text>
