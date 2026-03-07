@@ -11,7 +11,8 @@ import {
   Pressable,
   Animated,
   Easing,
-  Image
+  Image,
+  FlatList,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -663,11 +664,7 @@ export default function App() {
 
       if (consolidationFeeSkr > 0) {
         const feeTx = txBatch[txBatch.length - 1];
-        const sim = await connection.simulateTransaction(feeTx, {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          commitment: 'confirmed',
-        });
+        const sim = await connection.simulateTransaction(feeTx);
         if (sim.value.err) {
           throw new Error(`Fee transaction simulation failed: ${JSON.stringify(sim.value.err)}`);
         }
@@ -854,18 +851,25 @@ export default function App() {
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!stakeAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
-            {stakeAccounts.map((a) => {
-              const isDest = destination === a.pubkey;
-              return (
-                <Text
-                  key={`dest-${a.pubkey}`}
-                  style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
-                  onPress={() => setDestination(a.pubkey)}
-                >
-                  {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
-                </Text>
-              );
-            })}
+            <FlatList
+              data={stakeAccounts}
+              keyExtractor={(a) => `dest-${a.pubkey}`}
+              scrollEnabled={false}
+              initialNumToRender={12}
+              maxToRenderPerBatch={12}
+              windowSize={5}
+              renderItem={({ item: a }) => {
+                const isDest = destination === a.pubkey;
+                return (
+                  <Text
+                    style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
+                    onPress={() => setDestination(a.pubkey)}
+                  >
+                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
+                  </Text>
+                );
+              }}
+            />
 
             <View style={styles.row}>
               <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={() => loadStakeAccounts()} />
@@ -886,26 +890,33 @@ export default function App() {
             {filteredSourceStakeAccounts.length === 0 && (
               <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>
             )}
-            {filteredSourceStakeAccounts.map((a) => {
-              const checked = !!selected[a.pubkey];
-              return (
-                <Text
-                  key={`src-${a.pubkey}`}
-                  style={[styles.account, checked && styles.accountSelected, theme === 'light' && styles.accountLight]}
-                  onPress={() => {
-                    const next = { ...selected };
-                    if (!checked && selectedCount >= MAX_SOURCE_ACCOUNTS) {
-                      setStatus(`Maximum ${MAX_SOURCE_ACCOUNTS} source stake accounts.`);
-                      return;
-                    }
-                    next[a.pubkey] = !checked;
-                    setSelected(next);
-                  }}
-                >
-                  {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
-                </Text>
-              );
-            })}
+            <FlatList
+              data={filteredSourceStakeAccounts}
+              keyExtractor={(a) => `src-${a.pubkey}`}
+              scrollEnabled={false}
+              initialNumToRender={16}
+              maxToRenderPerBatch={16}
+              windowSize={7}
+              renderItem={({ item: a }) => {
+                const checked = !!selected[a.pubkey];
+                return (
+                  <Text
+                    style={[styles.account, checked && styles.accountSelected, theme === 'light' && styles.accountLight]}
+                    onPress={() => {
+                      const next = { ...selected };
+                      if (!checked && selectedCount >= MAX_SOURCE_ACCOUNTS) {
+                        setStatus(`Maximum ${MAX_SOURCE_ACCOUNTS} source stake accounts.`);
+                        return;
+                      }
+                      next[a.pubkey] = !checked;
+                      setSelected(next);
+                    }}
+                  >
+                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
+                  </Text>
+                );
+              }}
+            />
           </Animated.View>
         )}
 
