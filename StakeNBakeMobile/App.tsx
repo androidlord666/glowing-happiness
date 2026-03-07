@@ -1913,9 +1913,9 @@ export default function App() {
         <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Quick Tips</Text>
-            <Text style={styles.meta}>• Unstake (deactivate) first, then withdraw when inactive.</Text>
-            <Text style={styles.meta}>• Consolidation fee is always shown before you sign.</Text>
-            <Text style={styles.meta}>• Use Refresh after confirmations to sync balances and state.</Text>
+            <Text style={styles.meta}>• Create stake above rent-exempt minimum (tiny amounts fail by design).</Text>
+            <Text style={styles.meta}>• Consolidate to one destination; use batch for large runs, sequential for troubleshooting.</Text>
+            <Text style={styles.meta}>• Withdraw only when status is Inactive, then refresh after confirmations.</Text>
             <ActionButton label="Got it" onPress={() => setShowTips(false)} />
           </View>
         </View>
