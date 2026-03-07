@@ -90,6 +90,12 @@ function actionError(prefix: string, e: any): string {
   return `${prefix}: ${normalizeErrorMessage(e)}`;
 }
 
+function presentStakeState(state?: string): string {
+  if (!state || state === 'unknown') return 'undelegated';
+  if (state === 'initialized') return 'undelegated';
+  return state;
+}
+
 async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -575,10 +581,10 @@ export default function App() {
       setStatus('Checking stake account withdraw eligibility...');
 
       const stakePubkey = asPublicKey(destination);
-      const [activation, epochInfo, accountInfo] = await Promise.all([
-        connection.getStakeActivation(stakePubkey, 'confirmed'),
+      const [epochInfo, accountInfo, parsedInfo] = await Promise.all([
         connection.getEpochInfo('confirmed'),
         connection.getAccountInfo(stakePubkey, 'confirmed'),
+        connection.getParsedAccountInfo(stakePubkey, 'confirmed'),
       ]);
 
       if (!accountInfo) throw new Error('Stake account not found. Refresh and try again.');
@@ -586,8 +592,21 @@ export default function App() {
         throw new Error('Selected account is not a stake account.');
       }
 
-      if (activation.state !== 'inactive') {
-        throw new Error(`Stake account is ${activation.state} (epoch ${epochInfo.epoch}). Wait until inactive before withdrawing.`);
+      const parsedType = (parsedInfo.value?.data as any)?.parsed?.type as string | undefined;
+      const isDelegated = parsedType === 'delegated';
+
+      if (isDelegated) {
+        let activationState = 'unknown';
+        try {
+          const activation = await connection.getStakeActivation(stakePubkey, 'confirmed');
+          activationState = activation.state;
+        } catch {
+          throw new Error('Could not read delegated stake activation state. Try refresh and retry.');
+        }
+
+        if (activationState !== 'inactive') {
+          throw new Error(`Stake account is ${activationState} (epoch ${epochInfo.epoch}). Wait until inactive before withdrawing.`);
+        }
       }
 
       const lamports = accountInfo.lamports;
@@ -921,7 +940,7 @@ export default function App() {
                     style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
                     onPress={() => setDestination(a.pubkey)}
                   >
-                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
+                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {presentStakeState(a.stakeState)}
                   </Text>
                 );
               }}
@@ -968,7 +987,7 @@ export default function App() {
                       setSelected(next);
                     }}
                   >
-                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {a.stakeState ?? 'unknown'}
+                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {presentStakeState(a.stakeState)}
                   </Text>
                 );
               }}
