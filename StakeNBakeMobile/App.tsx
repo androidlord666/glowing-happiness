@@ -973,9 +973,6 @@ export default function App() {
         )}
 
         <Text style={styles.status}>{status}</Text>
-        <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnBottomRight}>
-          <Text style={{ fontSize: 18 }}>⚙️</Text>
-        </Pressable>
         {!!lastSignature && (
           <View>
             <Text style={styles.meta}>Latest tx: {shortAddr(lastSignature)}</Text>
@@ -996,6 +993,10 @@ export default function App() {
           </View>
         )}
       </ScrollView>
+
+      <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnTopRight}>
+        <Text style={{ fontSize: 18 }}>⚙️</Text>
+      </Pressable>
 
       {showSettings && (
         <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
@@ -1151,16 +1152,16 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 4 },
   headerLogo: { width: 240, height: 40 },
-  gearBtnBottomRight: {
+  gearBtnTopRight: {
     position: 'absolute',
     right: 14,
-    bottom: 12,
+    top: 14,
     padding: 8,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
-    zIndex: 30,
+    zIndex: 80,
   },
   settingsSheet: {
     position: 'absolute',
