@@ -1589,10 +1589,16 @@ export default function App() {
               keyboardType="decimal-pad"
             />
             <View style={styles.swapActionRow}>
-              <Pressable style={styles.swapActionBtn} onPress={fetchSwapQuote}>
+              <Pressable
+                style={({ pressed }) => [styles.swapActionBtn, pressed && styles.swapActionBtnPressed]}
+                onPress={fetchSwapQuote}
+              >
                 <Text style={styles.swapActionBtnText}>{swapBusy ? 'Quoting…' : 'Get Quote'}</Text>
               </Pressable>
-              <Pressable style={styles.swapActionBtn} onPress={executeSwapInApp}>
+              <Pressable
+                style={({ pressed }) => [styles.swapActionBtn, pressed && styles.swapActionBtnPressed]}
+                onPress={executeSwapInApp}
+              >
                 <Text style={styles.swapActionBtnText}>{swapBusy ? 'Swapping…' : 'Swap Now'}</Text>
               </Pressable>
             </View>
@@ -1610,10 +1616,16 @@ export default function App() {
           <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Receive</Text>
             <View style={styles.swapActionRow}>
-              <Pressable style={styles.swapActionBtn} onPress={copyWalletAddress}>
+              <Pressable
+                style={({ pressed }) => [styles.swapActionBtn, pressed && styles.swapActionBtnPressed]}
+                onPress={copyWalletAddress}
+              >
                 <Text style={styles.swapActionBtnText}>Copy Address</Text>
               </Pressable>
-              <Pressable style={styles.swapActionBtn} onPress={() => setShowQr((v) => !v)}>
+              <Pressable
+                style={({ pressed }) => [styles.swapActionBtn, pressed && styles.swapActionBtnPressed]}
+                onPress={() => setShowQr((v) => !v)}
+              >
                 <Text style={styles.swapActionBtnText}>{showQr ? 'Hide QR' : 'Show QR'}</Text>
               </Pressable>
             </View>
@@ -1969,14 +1981,20 @@ const styles = StyleSheet.create({
   swapActionBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#101824',
+    borderColor: '#00D7C8',
+    backgroundColor: '#14F195',
     borderRadius: 10,
     paddingVertical: 10,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  swapActionBtnText: { color: '#D6EFEA', fontWeight: '800', fontSize: 14 },
+  swapActionBtnPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
+    borderColor: '#00B8AB',
+    backgroundColor: '#0AD7B8',
+  },
+  swapActionBtnText: { color: '#072225', fontWeight: '700', fontSize: 14 },
   swapQuote: { color: '#14F195', fontWeight: '700', marginTop: 4 },
   warnText: { color: '#FFB86B', fontWeight: '700', marginTop: 4 },
   confirmOverlay: {
