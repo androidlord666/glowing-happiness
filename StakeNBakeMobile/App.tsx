@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.30 (code 41)';
+const APP_VERSION_LABEL = 'v2.31 (code 42)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -110,6 +110,11 @@ function presentStakeState(state?: string): string {
 function isDelegatedState(state?: string): boolean {
   const s = presentStakeState(state);
   return s === 'delegated' || s === 'activating' || s === 'active' || s === 'deactivating';
+}
+
+function isWithdrawReadyState(state?: string): boolean {
+  const s = presentStakeState(state);
+  return s === 'undelegated' || s === 'inactive';
 }
 
 function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
@@ -379,7 +384,11 @@ export default function App() {
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
-  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && destinationState !== 'active' && destinationState !== 'deactivating' && destinationState !== 'activating' && destinationState !== 'syncing';
+  const withdrawReadyAccounts = useMemo(
+    () => stakeAccounts.filter((a) => isWithdrawReadyState(a.stakeState)),
+    [stakeAccounts]
+  );
+  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && isWithdrawReadyState(destinationState);
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
@@ -1290,7 +1299,12 @@ export default function App() {
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
             {!!destinationOrderedAccounts.length && (
-              <Text style={styles.meta}>Undelegated (ready): {undelegatedAccounts.length} · Delegated/activating: {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
+              <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Undelegated: {undelegatedAccounts.length} · Delegated/activating: {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
+            )}
+            {!!withdrawReadyAccounts.length && (
+              <Text style={styles.link} onPress={() => setDestination(withdrawReadyAccounts[0].pubkey)}>
+                Jump to first withdraw-ready account
+              </Text>
             )}
             <FlatList
               data={destinationOrderedAccounts}
