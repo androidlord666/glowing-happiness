@@ -65,6 +65,7 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
 const PLATFORM_FEE_PER_SOURCE_SKR = 10;
 const PLATFORM_FEE_CAP_SKR = 100;
+const MAX_BATCH_TX_PER_REQUEST = 12;
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -156,6 +157,15 @@ function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): s
   if (decimals <= 0) return whole.toString();
   const fracStr = frac.toString().padStart(decimals, '0').slice(0, Math.max(0, maxFrac));
   return `${whole.toString()}.${fracStr}`.replace(/\.0+$/, '').replace(/\.$/, '');
+}
+
+function chunkArray<T>(items: T[], size: number): T[][] {
+  if (size <= 0) return [items];
+  const chunks: T[][] = [];
+  for (let i = 0; i < items.length; i += size) {
+    chunks.push(items.slice(i, i + size));
+  }
+  return chunks;
 }
 
 async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
@@ -705,9 +715,15 @@ export default function App() {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(createStakeSol);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter valid SOL amount');
+      const amountLamports = Math.round(amount * LAMPORTS_PER_SOL);
+      const minStakeLamports = await connection.getMinimumBalanceForRentExemption(StakeProgram.space);
+      if (amountLamports < minStakeLamports) {
+        const minStakeSol = (minStakeLamports / LAMPORTS_PER_SOL).toFixed(6);
+        throw new Error(`Minimum create stake amount is ${minStakeSol} SOL (rent-exempt minimum).`);
+      }
 
       const balLamports = await connection.getBalance(asPublicKey(wallet));
-      if (balLamports < Math.round(amount * LAMPORTS_PER_SOL)) {
+      if (balLamports < amountLamports + 10_000) {
         throw new Error('Insufficient balance for staking amount');
       }
 
@@ -1042,26 +1058,34 @@ export default function App() {
       const submittedMergeSigs: string[] = [];
       let failedMergeCount = 0;
       if (consolidationSendMode === 'batch') {
-        const batchTxs = await Promise.all(
-          mergeTxsToSend.map(async (tx) => {
-            const recent = await connection.getLatestBlockhash('confirmed');
-            tx.recentBlockhash = recent.blockhash;
-            tx.lastValidBlockHeight = recent.lastValidBlockHeight;
-            tx.feePayer = owner;
-            return tx;
-          })
-        );
-        setStatus(`Submitting consolidation batch (${batchTxs.length} tx)...`);
-        const sigs = await walletAdapter.signAndSendTransactions(batchTxs);
-        for (let i = 0; i < batchTxs.length; i++) {
-          const sig = sigs[i];
-          if (!sig) {
-            failedMergeCount += 1;
-            continue;
+        const batchChunks = chunkArray(mergeTxsToSend, MAX_BATCH_TX_PER_REQUEST);
+        let globalIdx = 0;
+        for (let c = 0; c < batchChunks.length; c++) {
+          const txChunk = batchChunks[c];
+          const preparedChunk = await Promise.all(
+            txChunk.map(async (tx) => {
+              const recent = await connection.getLatestBlockhash('confirmed');
+              tx.recentBlockhash = recent.blockhash;
+              tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+              tx.feePayer = owner;
+              return tx;
+            })
+          );
+
+          setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${preparedChunk.length} tx)...`);
+          const sigs = await walletAdapter.signAndSendTransactions(preparedChunk);
+          for (let i = 0; i < preparedChunk.length; i++) {
+            const sig = sigs[i];
+            const index = globalIdx + i + 1;
+            if (!sig) {
+              failedMergeCount += 1;
+              continue;
+            }
+            rememberTx(sig);
+            trackPendingTx(sig, `Consolidation tx ${index}/${mergeTxsToSend.length}`);
+            submittedMergeSigs.push(sig);
           }
-          rememberTx(sig);
-          trackPendingTx(sig, `Consolidation tx ${i + 1}/${batchTxs.length}`);
-          submittedMergeSigs.push(sig);
+          globalIdx += preparedChunk.length;
         }
         await Promise.all(
           submittedMergeSigs.map(async (sig) => {
