@@ -42,13 +42,13 @@ const walletAdapter = createWalletAdapter();
 const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
 const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
 
-type Mode = 'stake' | 'send' | 'receive';
+type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.17 (code 28)';
+const APP_VERSION_LABEL = 'v2.18 (code 29)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -57,6 +57,8 @@ const FEATURE_WITHDRAW_ENABLED = true;
 
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
+const SOL_MINT = 'So11111111111111111111111111111111111111112';
+const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
 const PLATFORM_FEE_PER_SOURCE_SKR = 10;
 const PLATFORM_FEE_CAP_SKR = 100;
 
@@ -165,6 +167,11 @@ export default function App() {
   const [createStakeSol, setCreateStakeSol] = useState('0.1');
   const [sendTo, setSendTo] = useState('');
   const [sendSol, setSendSol] = useState('0.01');
+  const [swapAmount, setSwapAmount] = useState('0.1');
+  const [swapDir, setSwapDir] = useState<'SOL_TO_SKR' | 'SKR_TO_SOL'>('SOL_TO_SKR');
+  const [swapSlippageBps, setSwapSlippageBps] = useState(100);
+  const [swapQuoteText, setSwapQuoteText] = useState('');
+  const [swapBusy, setSwapBusy] = useState(false);
   const [snsPreview, setSnsPreview] = useState('');
   const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -809,6 +816,39 @@ export default function App() {
     }
   };
 
+  const fetchSwapQuote = async () => {
+    try {
+      const amountNum = Number(swapAmount);
+      if (!Number.isFinite(amountNum) || amountNum <= 0) throw new Error('Enter a valid swap amount');
+      setSwapBusy(true);
+      setSwapQuoteText('Fetching quote...');
+
+      const inputMint = swapDir === 'SOL_TO_SKR' ? SOL_MINT : SKR_MINT;
+      const outputMint = swapDir === 'SOL_TO_SKR' ? SKR_MINT : SOL_MINT;
+      const decimalsIn = 9;
+      const raw = Math.floor(amountNum * Math.pow(10, decimalsIn));
+
+      const url = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${raw}&slippageBps=${swapSlippageBps}`;
+      const res = await fetch(url, { headers: { 'x-api-key': JUPITER_API_KEY } });
+      if (!res.ok) throw new Error(`Jupiter quote failed (${res.status})`);
+      const q: any = await res.json();
+      const outRaw = Number(q?.outAmount ?? 0);
+      if (!outRaw) throw new Error('No quote output amount');
+      const outUi = outRaw / Math.pow(10, 9);
+      const outSym = swapDir === 'SOL_TO_SKR' ? 'SKR' : 'SOL';
+      setSwapQuoteText(`Quote: ~${outUi.toFixed(6)} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
+    } catch (e: any) {
+      setSwapQuoteText(`Quote error: ${normalizeErrorMessage(e)}`);
+    } finally {
+      setSwapBusy(false);
+    }
+  };
+
+  const openJupiterSwap = async () => {
+    const pair = swapDir === 'SOL_TO_SKR' ? `${SOL_MINT}-${SKR_MINT}` : `${SKR_MINT}-${SOL_MINT}`;
+    await Linking.openURL(`https://jup.ag/swap/${pair}`);
+  };
+
   const onSend = async () => {
     if (busy) return;
     try {
@@ -993,6 +1033,7 @@ export default function App() {
             <ActionButton label="Staking" onPress={() => setMode('stake')} />
             <ActionButton label="Send" onPress={() => setMode('send')} />
             <ActionButton label="Receive" onPress={() => setMode('receive')} />
+            <ActionButton label="Swap" onPress={() => setMode('swap')} />
           </View>
         </View>
 
@@ -1131,6 +1172,37 @@ export default function App() {
               <ActionButton label="Max" onPress={onSendMax} disabled={busy} />
               <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
             </View>
+          </Animated.View>
+        )}
+
+        {mode === 'swap' && (
+          <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
+            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Swap (Jupiter)</Text>
+            <Text style={styles.meta}>Pair: SOL ↔ SKR</Text>
+            <View style={styles.row}>
+              <ActionButton
+                label={swapDir === 'SOL_TO_SKR' ? 'SOL → SKR' : 'SKR → SOL'}
+                onPress={() => setSwapDir((d) => (d === 'SOL_TO_SKR' ? 'SKR_TO_SOL' : 'SOL_TO_SKR'))}
+              />
+              <ActionButton
+                label={`Slippage: ${(swapSlippageBps / 100).toFixed(2)}%`}
+                onPress={() => setSwapSlippageBps((s) => (s === 50 ? 100 : s === 100 ? 200 : 50))}
+              />
+            </View>
+            <TextInput
+              style={[styles.input, theme === 'light' && styles.inputLight]}
+              placeholder={swapDir === 'SOL_TO_SKR' ? 'Amount SOL' : 'Amount SKR'}
+              placeholderTextColor={colors.muted}
+              value={swapAmount}
+              onChangeText={setSwapAmount}
+              keyboardType="decimal-pad"
+            />
+            <View style={styles.row}>
+              <ActionButton label={swapBusy ? 'Quoting…' : 'Get Quote'} onPress={fetchSwapQuote} />
+              <ActionButton label="Open Jupiter" onPress={openJupiterSwap} />
+            </View>
+            {!!swapQuoteText && <Text style={styles.meta}>{swapQuoteText}</Text>}
+            <Text style={styles.meta}>Execution opens Jupiter to complete signed swap.</Text>
           </Animated.View>
         )}
 
