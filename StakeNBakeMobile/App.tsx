@@ -51,7 +51,7 @@ type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
 const APP_VERSION_LABEL = 'v2.39 (code 50)';
-const MAX_SOURCE_ACCOUNTS = 99;
+const MAX_SOURCE_ACCOUNTS = 25;
 
 // Feature flags (fast emergency toggles)
 const FEATURE_FEE_ENABLED = true;
@@ -882,7 +882,8 @@ export default function App() {
 
       setSelected({});
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx; merged ${mergeTxsToSend.length}/${txs.length} source tx; fee ${consolidationFeeSkrText} SKR). Swipe down from top to sync stake state.`);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx; merged ${mergeTxsToSend.length}/${txs.length} source tx; fee ${consolidationFeeSkrText} SKR). Syncing stake state...`);
+      await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
