@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.37 (code 48)';
+const APP_VERSION_LABEL = 'v2.38 (code 49)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -580,47 +580,43 @@ export default function App() {
         500
       );
 
-      // Fast path: render accounts first, then lazily hydrate stake state metadata.
+      // Accuracy-first: resolve stake state for all accounts in this refresh pass.
       const seeded = items.map((a) => ({ ...a, stakeState: a.stakeState ?? 'syncing' }));
       setRpcHealth('healthy');
-      lastStakeAccountsRef.current = seeded;
       setStakeAccounts(seeded);
+
+      const resolved = await Promise.all(
+        seeded.map(async (a) => {
+          try {
+            const meta = await getStakeParsedMeta(connection, a.pubkey);
+            return { ...a, stakeState: meta.delegationState ?? 'unknown' };
+          } catch {
+            return { ...a, stakeState: 'unknown' };
+          }
+        })
+      );
+
+      lastStakeAccountsRef.current = resolved;
+      setStakeAccounts(resolved);
 
       const elapsed = Date.now() - startedAt;
       refreshMetricsRef.current.count += 1;
       refreshMetricsRef.current.totalMs += elapsed;
-
-      const lazyTargets = seeded.slice(0, 16);
-      Promise.all(
-        lazyTargets.map(async (a) => {
-          try {
-            const meta = await getStakeParsedMeta(connection, a.pubkey);
-            return { pubkey: a.pubkey, stakeState: meta.delegationState ?? 'unknown' };
-          } catch {
-            return { pubkey: a.pubkey, stakeState: 'unknown' };
-          }
-        })
-      ).then((updates) => {
-        setStakeAccounts((prev) => prev.map((acc) => {
-          const next = updates.find((u) => u.pubkey === acc.pubkey);
-          return next ? { ...acc, stakeState: next.stakeState } : acc;
-        }));
-      });
       setSelected((prev) => {
-        const valid = new Set(seeded.map((i) => i.pubkey));
+        const valid = new Set(resolved.map((i) => i.pubkey));
         const next: Record<string, boolean> = {};
         for (const [k, v] of Object.entries(prev)) {
           if (v && valid.has(k)) next[k] = true;
         }
         return next;
       });
-      if (!seeded.length) {
+      if (!resolved.length) {
         setDestination('');
-      } else if (!destination || !seeded.some((i) => i.pubkey === destination)) {
-        const firstDelegated = seeded.find((i) => isDelegatedState(i.stakeState));
-        setDestination((firstDelegated ?? seeded[0]).pubkey);
+      } else if (!destination || !resolved.some((i) => i.pubkey === destination)) {
+        const firstDelegated = resolved.find((i) => isDelegatedState(i.stakeState));
+        setDestination((firstDelegated ?? resolved[0]).pubkey);
       }
-      setStatus(seeded.length ? `Loaded ${seeded.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
+      setStatus(resolved.length ? `Loaded ${resolved.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
       if (!opts?.skipBalances) {
         await refreshWalletBalances(activeWallet);
       }
@@ -810,33 +806,8 @@ export default function App() {
         },
       });
 
-      setStatus('Preflighting consolidation transactions...');
-      const validMergeTxs: Transaction[] = [];
-      const failedMergeReasons: string[] = [];
-      for (let i = 0; i < txs.length; i++) {
-        const sim = await connection.simulateTransaction(txs[i], {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          commitment: 'confirmed',
-        });
-        if (sim.value.err) {
-          failedMergeReasons.push(`src ${i + 1}: ${JSON.stringify(sim.value.err)}`);
-          continue;
-        }
-        validMergeTxs.push(txs[i]);
-      }
-
-      let mergeTxsToSend = validMergeTxs;
-      if (!validMergeTxs.length) {
-        // Fallback to legacy behavior: try original merge txs batch directly.
-        // Some stake states can be overly strict in preflight simulation but still
-        // succeed when wallet signs/sends on-chain.
-        mergeTxsToSend = txs;
-        setStatus('Preflight was inconclusive; retrying with direct consolidation send...');
-      } else if (failedMergeReasons.length) {
-        setStatus(`Skipping ${failedMergeReasons.length} incompatible source(s).`);
-      }
-
+      // Legacy direct send path: this has proven most reliable with MWA stake merge flow.
+      let mergeTxsToSend = txs;
       let txBatch = [...mergeTxsToSend];
       if (consolidationFeeSkr > 0) {
         const owner = asPublicKey(wallet);
