@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.25 (code 36)';
+const APP_VERSION_LABEL = 'v2.26 (code 37)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -185,6 +185,10 @@ export default function App() {
   const [swapQuote, setSwapQuote] = useState<any>(null);
   const [swapQuoteAtMs, setSwapQuoteAtMs] = useState<number>(0);
   const [swapBusy, setSwapBusy] = useState(false);
+  const [swapRouteText, setSwapRouteText] = useState('');
+  const [swapImpactPct, setSwapImpactPct] = useState<number>(0);
+  const [swapMinReceivedText, setSwapMinReceivedText] = useState('');
+  const [swapStale, setSwapStale] = useState(false);
   const [skrDecimals, setSkrDecimals] = useState(SKR_FALLBACK_DECIMALS);
   const [snsPreview, setSnsPreview] = useState('');
   const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
@@ -293,7 +297,22 @@ export default function App() {
     setSwapQuote(null);
     setSwapQuoteAtMs(0);
     setSwapQuoteText('');
+    setSwapRouteText('');
+    setSwapMinReceivedText('');
+    setSwapImpactPct(0);
+    setSwapStale(false);
   }, [swapDir, swapAmount, swapSlippageBps]);
+
+  useEffect(() => {
+    if (mode !== 'swap' || !isAppActive || !swapQuoteAtMs) return;
+    const tick = setInterval(() => {
+      const age = Date.now() - swapQuoteAtMs;
+      setSwapStale(age > 12000);
+    }, 1000);
+    return () => clearInterval(tick);
+  }, [mode, isAppActive, swapQuoteAtMs]);
+
+
 
   useEffect(() => {
     const loadMintDecimals = async () => {
@@ -854,6 +873,15 @@ export default function App() {
     try {
       const amountNum = Number(swapAmount);
       if (!Number.isFinite(amountNum) || amountNum <= 0) throw new Error('Enter a valid swap amount');
+      if (!wallet) throw new Error('Connect wallet first');
+
+      // Pre-balance checks
+      const inSymbol = swapDir === 'SOL_TO_SKR' ? 'SOL' : 'SKR';
+      const available = Number(swapDir === 'SOL_TO_SKR' ? walletSolBalance : walletSkrBalance);
+      if (Number.isFinite(available) && amountNum > available) {
+        throw new Error(`Insufficient ${inSymbol} balance`);
+      }
+
       setSwapBusy(true);
       setSwapQuoteText('Fetching quote...');
 
@@ -878,12 +906,28 @@ export default function App() {
 
       setSwapQuote(q);
       setSwapQuoteAtMs(Date.now());
+      setSwapStale(false);
+
       const decimalsOut = swapDir === 'SOL_TO_SKR' ? skrDecimals : 9;
       const outUi = formatRawAmount(outRaw.toString(), decimalsOut, 6);
       const outSym = swapDir === 'SOL_TO_SKR' ? 'SKR' : 'SOL';
+      const minOutRaw = q?.otherAmountThreshold ? String(q.otherAmountThreshold) : String(outRaw);
+      setSwapMinReceivedText(`${formatRawAmount(minOutRaw, decimalsOut, 6)} ${outSym}`);
+
+      const route = Array.isArray(q?.routePlan)
+        ? q.routePlan.map((r: any) => r?.swapInfo?.label).filter(Boolean).join(' → ')
+        : '';
+      setSwapRouteText(route || 'Route unavailable');
+
+      const impact = Number(q?.priceImpactPct ?? 0);
+      setSwapImpactPct(Number.isFinite(impact) ? impact : 0);
       setSwapQuoteText(`Quote: ~${outUi} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
     } catch (e: any) {
       setSwapQuoteText(`Quote error: ${normalizeErrorMessage(e)}`);
+      setSwapQuote(null);
+      setSwapRouteText('');
+      setSwapMinReceivedText('');
+      setSwapImpactPct(0);
     } finally {
       setSwapBusy(false);
     }
@@ -893,12 +937,35 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Connect wallet first');
       if (!swapQuote) throw new Error('Get a quote first');
+      let quoteToUse = swapQuote;
       const ageMs = Date.now() - swapQuoteAtMs;
-      if (!swapQuoteAtMs || ageMs > 15000) {
-        throw new Error('Quote stale. Tap Get Quote again.');
+      if (!swapQuoteAtMs || ageMs > 15000 || swapStale) {
+        await fetchSwapQuote();
+        if (!swapQuote) throw new Error('Quote stale. Tap Get Quote again.');
+        quoteToUse = swapQuote;
       }
+      const amountNum = Number(swapAmount);
+      const inSymbol = swapDir === 'SOL_TO_SKR' ? 'SOL' : 'SKR';
+      const available = Number(swapDir === 'SOL_TO_SKR' ? walletSolBalance : walletSkrBalance);
+      if (Number.isFinite(available) && Number.isFinite(amountNum) && amountNum > available) {
+        throw new Error(`Insufficient ${inSymbol} balance`);
+      }
+
       setSwapBusy(true);
       setStatus('Building Jupiter swap transaction...');
+
+      const owner = asPublicKey(wallet);
+      const outMint = asPublicKey(swapDir === 'SOL_TO_SKR' ? SKR_MINT : SOL_MINT);
+      if (swapDir === 'SOL_TO_SKR') {
+        const outAta = getAssociatedTokenAddressSync(outMint, owner);
+        const outAtaInfo = await connection.getAccountInfo(outAta, 'confirmed');
+        if (!outAtaInfo) {
+          setStatus('Preparing destination token account (SKR)...');
+        }
+      }
+
+      const beforeSol = Number(walletSolBalance);
+      const beforeSkr = Number(walletSkrBalance);
 
       const res = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
         method: 'POST',
@@ -908,7 +975,7 @@ export default function App() {
         },
         body: JSON.stringify({
           userPublicKey: wallet,
-          quoteResponse: swapQuote,
+          quoteResponse: quoteToUse,
           wrapAndUnwrapSol: true,
           dynamicComputeUnitLimit: true,
         }),
@@ -936,8 +1003,19 @@ export default function App() {
         trackPendingTx(sigs[0], 'Swap transaction');
         setStatus('✅ Swap submitted. Confirming...');
         await connection.confirmTransaction(sigs[0], 'confirmed');
-        setStatus('✅ Swap confirmed. Refreshing balances...');
-        await refreshWalletBalances(wallet);
+        const owner = asPublicKey(wallet);
+        const ownerAta = getAssociatedTokenAddressSync(asPublicKey(SKR_MINT), owner);
+        const [solLamports, skrBal] = await Promise.all([
+          connection.getBalance(owner, 'confirmed'),
+          connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null),
+        ]);
+        const afterSol = solLamports / LAMPORTS_PER_SOL;
+        const afterSkr = Number(skrBal?.value?.uiAmountString ?? '0');
+        setWalletSolBalance(afterSol.toFixed(4));
+        setWalletSkrBalance(Number.isFinite(afterSkr) ? String(afterSkr) : '0');
+        const dSol = Number.isFinite(beforeSol) ? (afterSol - beforeSol).toFixed(4) : 'n/a';
+        const dSkr = Number.isFinite(beforeSkr) ? (afterSkr - beforeSkr).toFixed(4) : 'n/a';
+        setStatus(`✅ Swap confirmed. ΔSOL ${dSol} / ΔSKR ${dSkr}`);
       }
     } catch (e: any) {
       setStatus(actionError('Swap error', e));
@@ -947,6 +1025,16 @@ export default function App() {
   };
 
 
+
+  useEffect(() => {
+    if (mode !== 'swap' || !isAppActive) return;
+    const tick = setInterval(() => {
+      if (swapBusy) return;
+      if (!swapAmount || Number(swapAmount) <= 0) return;
+      fetchSwapQuote().catch(() => {});
+    }, 10000);
+    return () => clearInterval(tick);
+  }, [mode, isAppActive, swapAmount, swapDir, swapSlippageBps, swapBusy, walletSolBalance, walletSkrBalance]);
 
   const onSend = async () => {
     if (busy) return;
@@ -1296,10 +1384,9 @@ export default function App() {
                 label={swapDir === 'SOL_TO_SKR' ? 'SOL → SKR' : 'SKR → SOL'}
                 onPress={() => setSwapDir((d) => (d === 'SOL_TO_SKR' ? 'SKR_TO_SOL' : 'SOL_TO_SKR'))}
               />
-              <ActionButton
-                label={`Slippage: ${(swapSlippageBps / 100).toFixed(2)}%`}
-                onPress={() => setSwapSlippageBps((s) => (s === 50 ? 100 : s === 100 ? 200 : 50))}
-              />
+              <ActionButton label="-" onPress={() => setSwapSlippageBps((s) => Math.max(10, s - 10))} />
+              <ActionButton label={`Slip ${(swapSlippageBps / 100).toFixed(2)}%`} onPress={() => {}} />
+              <ActionButton label="+" onPress={() => setSwapSlippageBps((s) => Math.min(300, s + 10))} />
             </View>
             <TextInput
               style={[styles.input, theme === 'light' && styles.inputLight]}
@@ -1314,6 +1401,11 @@ export default function App() {
               <ActionButton label={swapBusy ? 'Swapping…' : 'Swap Now'} onPress={executeSwapInApp} />
             </View>
             {!!swapQuoteText && <Text style={styles.swapQuote}>{swapQuoteText}</Text>}
+            {!!swapMinReceivedText && <Text style={styles.meta}>Min received: {swapMinReceivedText}</Text>}
+            {!!swapRouteText && <Text style={styles.meta}>Route: {swapRouteText}</Text>}
+            <Text style={styles.meta}>Price impact: {(swapImpactPct * 100).toFixed(3)}%</Text>
+            {swapImpactPct > 0.02 && <Text style={styles.warnText}>⚠ High price impact — consider reducing amount.</Text>}
+            {swapStale && <Text style={styles.warnText}>⚠ Quote stale — auto-refreshing.</Text>}
             <Text style={styles.meta}>SKR decimals: {skrDecimals} · Swap executes in-app via Jupiter transaction.</Text>
           </Animated.View>
         )}
@@ -1623,6 +1715,7 @@ const styles = StyleSheet.create({
   status: { color: colors.secondary, marginTop: 10 },
   link: { color: colors.primary, textDecorationLine: 'underline', marginTop: 6 },
   swapQuote: { color: '#14F195', fontWeight: '700', marginTop: 4 },
+  warnText: { color: '#FFB86B', fontWeight: '700', marginTop: 4 },
   confirmOverlay: {
     position: 'absolute',
     left: 0,
