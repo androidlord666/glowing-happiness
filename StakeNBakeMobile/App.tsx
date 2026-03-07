@@ -115,8 +115,7 @@ function isDelegatedState(state?: string): boolean {
 
 function isWithdrawReadyState(state?: string): boolean {
   const s = presentStakeState(state);
-  // In practice, some warming-up accounts can still be withdrawable.
-  return s === 'undelegated' || s === 'inactive' || s === 'activating';
+  return s === 'undelegated' || s === 'inactive';
 }
 
 function isMergeStateCompatible(destinationState?: string, sourceState?: string): boolean {
@@ -795,6 +794,15 @@ export default function App() {
         to: asPublicKey(wallet),
         lamports,
       });
+
+      const sim = await connection.simulateTransaction(tx as any, {
+        sigVerify: false,
+        replaceRecentBlockhash: true,
+        commitment: 'confirmed',
+      } as any);
+      if (sim?.value?.err) {
+        throw new Error(`Withdraw not ready for ${shortAddr(target)} yet (${JSON.stringify(sim.value.err)}).`);
+      }
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
