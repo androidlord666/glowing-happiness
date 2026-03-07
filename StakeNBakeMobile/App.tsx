@@ -901,26 +901,7 @@ export default function App() {
         delegationVote: destinationAccount.delegationVote,
         delegationState: destinationAccount.stakeState,
       };
-      const sourceMeta: StakeParsedMeta[] = sourceSelectedKeys.map((k) => {
-        const src = stakeMap.get(k);
-        return {
-          delegationVote: src?.delegationVote,
-          delegationState: src?.stakeState,
-        };
-      });
-      const eligibilityReasons: string[] = [];
-      const eligibleSourceKeys = sourceSelectedKeys.filter((key, idx) => {
-        const meta = sourceMeta[idx];
-        if (destMeta.delegationVote && meta.delegationVote && meta.delegationVote !== destMeta.delegationVote) {
-          eligibilityReasons.push(`${shortAddr(key)}: delegated to different validator`);
-          return false;
-        }
-        return true;
-      });
-
-      if (eligibleSourceKeys.length === 0) {
-        throw new Error(`No merge-eligible source accounts. ${eligibilityReasons[0] ?? ''}`.trim());
-      }
+      const eligibleSourceKeys = sourceSelectedKeys;
 
       const owner = asPublicKey(wallet);
       // Delegate-in-consolidation has proven brittle across stake-state transitions.
@@ -1127,7 +1108,6 @@ export default function App() {
       setSelected({});
       await refreshWalletBalances(wallet);
       const notes: string[] = [];
-      if (eligibilityReasons.length) notes.push(`skipped ${eligibilityReasons.length} ineligible`);
       if (preflightValid.length && skippedByPreflight) notes.push(`skipped ${skippedByPreflight} preflight-failed`);
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
