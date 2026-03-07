@@ -12,6 +12,7 @@ export type ConsolidationPlan = {
   sources: PublicKey[];
   destination: PublicKey;
   validatorVote: PublicKey;
+  includeDelegateTx?: boolean;
 };
 
 export function lamportsToSol(lamports: number): string {
@@ -39,20 +40,20 @@ export async function buildConsolidationTransactions(params: {
 
   const recent = await connection.getLatestBlockhash('confirmed');
   const txs: Transaction[] = [];
-
-  const delegateTx = new Transaction({
-    feePayer: owner,
-    blockhash: recent.blockhash,
-    lastValidBlockHeight: recent.lastValidBlockHeight,
-  }).add(
-    StakeProgram.delegate({
-      stakePubkey: plan.destination,
-      authorizedPubkey: owner,
-      votePubkey: plan.validatorVote,
-    })
-  );
-
-  txs.push(delegateTx);
+  if (plan.includeDelegateTx ?? true) {
+    const delegateTx = new Transaction({
+      feePayer: owner,
+      blockhash: recent.blockhash,
+      lastValidBlockHeight: recent.lastValidBlockHeight,
+    }).add(
+      StakeProgram.delegate({
+        stakePubkey: plan.destination,
+        authorizedPubkey: owner,
+        votePubkey: plan.validatorVote,
+      })
+    );
+    txs.push(delegateTx);
+  }
 
   for (const source of plan.sources) {
     const t = new Transaction({

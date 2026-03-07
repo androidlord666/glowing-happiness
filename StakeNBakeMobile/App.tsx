@@ -118,6 +118,19 @@ function isWithdrawReadyState(state?: string): boolean {
   return s === 'undelegated' || s === 'inactive' || s === 'activating';
 }
 
+function isMergeStateCompatible(destinationState?: string, sourceState?: string): boolean {
+  const dest = presentStakeState(destinationState);
+  const source = presentStakeState(sourceState);
+  if (dest === 'syncing' || source === 'syncing') return true;
+  const destDelegated = isDelegatedState(dest);
+  const sourceDelegated = isDelegatedState(source);
+  if (destDelegated !== sourceDelegated) return false;
+  if (!destDelegated) {
+    return source === 'undelegated' || source === 'inactive';
+  }
+  return source === 'delegated' || source === 'active' || source === 'activating' || source === 'deactivating';
+}
+
 function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
   const n = typeof raw === 'number' ? BigInt(Math.floor(raw)) : BigInt(raw || '0');
   const base = BigInt(10) ** BigInt(decimals);
@@ -785,33 +798,97 @@ export default function App() {
         getStakeParsedMeta(connection, destination),
         ...sourceSelectedKeys.map((k) => getStakeParsedMeta(connection, k)),
       ]);
-
-      const incompatible = sourceMeta.find((m) => {
-        if (!destMeta.delegationVote || !m.delegationVote) return false;
-        return m.delegationVote !== destMeta.delegationVote;
+      const eligibilityReasons: string[] = [];
+      const eligibleSourceKeys = sourceSelectedKeys.filter((key, idx) => {
+        const meta = sourceMeta[idx];
+        if (destMeta.delegationVote && meta.delegationVote && meta.delegationVote !== destMeta.delegationVote) {
+          eligibilityReasons.push(`${shortAddr(key)}: delegated to different validator`);
+          return false;
+        }
+        if (!isMergeStateCompatible(destMeta.delegationState, meta.delegationState)) {
+          eligibilityReasons.push(`${shortAddr(key)}: incompatible stake state (${presentStakeState(meta.delegationState)})`);
+          return false;
+        }
+        return true;
       });
 
-      if (incompatible) {
-        throw new Error('Selected source account has different delegated validator than destination.');
+      if (eligibleSourceKeys.length === 0) {
+        throw new Error(`No merge-eligible source accounts. ${eligibilityReasons[0] ?? ''}`.trim());
       }
 
-      const sources = sourceSelectedKeys.map(asPublicKey);
+      const owner = asPublicKey(wallet);
+      const includeDelegateTx = !isDelegatedState(destMeta.delegationState);
       setStatus('Building consolidation transactions...');
       const txs = await buildConsolidationTransactions({
         connection,
-        owner: asPublicKey(wallet),
+        owner,
         plan: {
           destination: asPublicKey(destination),
-          sources,
+          sources: eligibleSourceKeys.map(asPublicKey),
           validatorVote: asPublicKey(validatorVote),
+          includeDelegateTx,
         },
       });
 
-      // Legacy direct send path: this has proven most reliable with MWA stake merge flow.
-      let mergeTxsToSend = txs;
-      let txBatch = [...mergeTxsToSend];
-      if (consolidationFeeSkr > 0) {
-        const owner = asPublicKey(wallet);
+      const mergeTxCandidates = includeDelegateTx ? txs.slice(1) : txs;
+      if (mergeTxCandidates.length === 0) {
+        throw new Error('No merge transactions were created.');
+      }
+
+      setStatus('Preflighting merge transactions...');
+      const preflight = await Promise.all(
+        mergeTxCandidates.map(async (tx) => {
+          try {
+            const sim = await connection.simulateTransaction(tx as any, {
+              sigVerify: false,
+              replaceRecentBlockhash: true,
+              commitment: 'confirmed',
+            } as any);
+            return { ok: !sim.value.err, err: sim.value.err };
+          } catch (e: any) {
+            return { ok: false, err: e?.message ?? 'simulation failed' };
+          }
+        })
+      );
+
+      const preflightValid = mergeTxCandidates.filter((_, i) => preflight[i].ok);
+      const mergeTxsToSend = preflightValid.length ? preflightValid : mergeTxCandidates;
+      const skippedByPreflight = preflight.length - preflightValid.length;
+
+      const submittedMergeSigs: string[] = [];
+      let failedMergeCount = 0;
+      for (let i = 0; i < mergeTxsToSend.length; i++) {
+        const tx = mergeTxsToSend[i];
+        try {
+          const recent = await connection.getLatestBlockhash('confirmed');
+          tx.recentBlockhash = recent.blockhash;
+          tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+          tx.feePayer = owner;
+
+          setStatus(`Submitting consolidation tx ${i + 1}/${mergeTxsToSend.length}...`);
+          const sigs = await walletAdapter.signAndSendTransactions([tx]);
+          const sig = sigs[0];
+          if (!sig) throw new Error('wallet returned empty signature');
+          rememberTx(sig);
+          trackPendingTx(sig, `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`);
+          await connection.confirmTransaction(sig, 'confirmed');
+          submittedMergeSigs.push(sig);
+        } catch (e: any) {
+          if (classifyError(e) === 'user') throw e;
+          failedMergeCount += 1;
+        }
+      }
+
+      if (submittedMergeSigs.length === 0) {
+        throw new Error('No consolidation transaction was confirmed. Refresh and try smaller batches.');
+      }
+
+      let feeSig = '';
+      const chargedFeeSkr = FEATURE_FEE_ENABLED
+        ? Math.min(submittedMergeSigs.length * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
+        : 0;
+
+      if (chargedFeeSkr > 0) {
         const mint = asPublicKey(SKR_MINT);
         const feeWallet = asPublicKey(PLATFORM_FEE_WALLET);
         const ownerAta = getAssociatedTokenAddressSync(mint, owner);
@@ -831,10 +908,10 @@ export default function App() {
           throw new Error('No SKR token account found in connected wallet.');
         }
 
-        const rawAmount = BigInt(Math.round(consolidationFeeSkr * Math.pow(10, decimals)));
+        const rawAmount = BigInt(Math.round(chargedFeeSkr * Math.pow(10, decimals)));
         const ownerRaw = BigInt(ownerTokenBal.value.amount);
         if (ownerRaw < rawAmount) {
-          throw new Error(`Insufficient SKR for fee. Need ${consolidationFeeSkrText} SKR.`);
+          throw new Error(`Insufficient SKR for fee. Need ${chargedFeeSkr.toFixed(2)} SKR.`);
         }
 
         const recent = await connection.getLatestBlockhash('confirmed');
@@ -860,29 +937,33 @@ export default function App() {
           )
         );
 
-        txBatch = [...txBatch, feeTx];
-      }
+        const feeSim = await connection.simulateTransaction(feeTx as any, {
+          sigVerify: false,
+          replaceRecentBlockhash: true,
+          commitment: 'confirmed',
+        } as any);
+        if (feeSim.value.err) {
+          throw new Error(`Fee transaction simulation failed: ${JSON.stringify(feeSim.value.err)}`);
+        }
 
-      if (consolidationFeeSkr > 0) {
-        const feeTx = txBatch[txBatch.length - 1];
-        const sim = await connection.simulateTransaction(feeTx);
-        if (sim.value.err) {
-          throw new Error(`Fee transaction simulation failed: ${JSON.stringify(sim.value.err)}`);
+        setStatus('Submitting platform fee transaction...');
+        const feeSigs = await walletAdapter.signAndSendTransactions([feeTx]);
+        feeSig = feeSigs[0] ?? '';
+        if (feeSig) {
+          rememberTx(feeSig);
+          trackPendingTx(feeSig, 'Platform fee transaction (SKR)');
+          await connection.confirmTransaction(feeSig, 'confirmed');
         }
       }
 
-      setStatus(`Submitting consolidation transactions (${txBatch.length})...`);
-      const sigs = await walletAdapter.signAndSendTransactions(txBatch);
-      sigs.forEach((sig, i) => {
-        if (!sig) return;
-        rememberTx(sig);
-        const isFeeTx = consolidationFeeSkr > 0 && i === txBatch.length - 1;
-        trackPendingTx(sig, isFeeTx ? 'Platform fee transaction (SKR)' : `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`);
-      });
-
       setSelected({});
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx; merged ${mergeTxsToSend.length}/${txs.length} source tx; fee ${consolidationFeeSkrText} SKR). Syncing stake state...`);
+      const notes: string[] = [];
+      if (eligibilityReasons.length) notes.push(`skipped ${eligibilityReasons.length} ineligible`);
+      if (preflightValid.length && skippedByPreflight) notes.push(`skipped ${skippedByPreflight} preflight-failed`);
+      if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
+      const noteText = notes.length ? ` (${notes.join(', ')})` : '';
+      setStatus(`✅ Consolidation confirmed (${submittedMergeSigs.length} merge tx${feeSig ? ' + fee tx' : ''}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
