@@ -142,6 +142,8 @@ export default function App() {
   const [lastSignature, setLastSignature] = useState('');
   const [txHistory, setTxHistory] = useState<string[]>([]);
   const [pendingTxs, setPendingTxs] = useState<Array<{ sig: string; label: string }>>([]);
+  const [walletSolBalance, setWalletSolBalance] = useState<string>('—');
+  const [walletSkrBalance, setWalletSkrBalance] = useState<string>('—');
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
   const [rpcHealth, setRpcHealth] = useState<RpcHealth>('healthy');
@@ -288,6 +290,27 @@ export default function App() {
     await loadStakeAccounts();
   };
 
+  const refreshWalletBalances = async (walletAddr?: string) => {
+    const active = walletAddr ?? wallet;
+    if (!active) return;
+    try {
+      const owner = asPublicKey(active);
+      const mint = asPublicKey(SKR_MINT);
+      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+
+      const [lamports, skrBal] = await Promise.all([
+        connection.getBalance(owner, 'confirmed'),
+        connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null),
+      ]);
+
+      setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
+      setWalletSkrBalance(skrBal?.value?.uiAmountString ?? '0');
+    } catch {
+      setWalletSolBalance('—');
+      setWalletSkrBalance('—');
+    }
+  };
+
   const selectAllValidSources = () => {
     const valid = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
     const next: Record<string, boolean> = {};
@@ -322,6 +345,7 @@ export default function App() {
     if (!isAppActive) return;
     if (!wallet) return;
     loadStakeAccounts(wallet).catch(() => {});
+    refreshWalletBalances(wallet).catch(() => {});
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAppActive]);
 
@@ -365,6 +389,7 @@ export default function App() {
       setScreen('app');
       setStatus('Wallet connected.');
       await loadStakeAccounts(session.address);
+      await refreshWalletBalances(session.address);
     } catch (e: any) {
       setStatus(actionError('Connect error', e));
     } finally {
@@ -381,6 +406,8 @@ export default function App() {
     setDestination('');
     setLastSignature('');
     setPendingTxs([]);
+    setWalletSolBalance('—');
+    setWalletSkrBalance('—');
     setStatus('Disconnected');
     setScreen('landing');
   };
@@ -450,6 +477,7 @@ export default function App() {
         setDestination(seeded[0].pubkey);
       }
       setStatus(seeded.length ? `Loaded ${seeded.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
+      await refreshWalletBalances(activeWallet);
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
@@ -838,7 +866,11 @@ export default function App() {
         <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Wallet</Text>
           <View style={[styles.walletBox, theme === 'light' && styles.walletBoxLight]}>
-            <Text style={[styles.walletText, theme === 'light' && styles.walletTextLight]}>{shortAddr(wallet)}</Text>
+            <View style={{ flex: 1, marginRight: 8 }}>
+              <Text style={[styles.walletText, theme === 'light' && styles.walletTextLight]}>{shortAddr(wallet)}</Text>
+              <Text style={[styles.meta, theme === 'light' && styles.walletTextLight]}>SOL: {walletSolBalance}</Text>
+              <Text style={[styles.meta, theme === 'light' && styles.walletTextLight]}>SKR: {walletSkrBalance}</Text>
+            </View>
             <ActionButton label="Disconnect" onPress={disconnectWallet} />
           </View>
 
