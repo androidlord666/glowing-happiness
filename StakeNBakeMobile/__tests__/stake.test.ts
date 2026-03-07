@@ -113,4 +113,36 @@ describe('stake consolidation tx builder', () => {
       expect(tx.instructions[0].programId.equals(StakeProgram.programId)).toBe(true);
     });
   });
+
+  test('supports consolidation batch ramp from 1 to 99 sources', async () => {
+    for (let sourceCount = 1; sourceCount <= 99; sourceCount++) {
+      const sources = Array.from({ length: sourceCount }, (_, i) => {
+        return new PublicKey(new Uint8Array(32).fill((i % 250) + 6));
+      });
+
+      const withDelegate = await buildConsolidationTransactions({
+        connection,
+        owner,
+        plan: {
+          destination,
+          sources,
+          validatorVote,
+          includeDelegateTx: true,
+        },
+      });
+      expect(withDelegate).toHaveLength(sourceCount + 1);
+
+      const withoutDelegate = await buildConsolidationTransactions({
+        connection,
+        owner,
+        plan: {
+          destination,
+          sources,
+          validatorVote,
+          includeDelegateTx: false,
+        },
+      });
+      expect(withoutDelegate).toHaveLength(sourceCount);
+    }
+  });
 });
