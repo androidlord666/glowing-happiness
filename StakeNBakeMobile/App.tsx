@@ -815,6 +815,7 @@ export default function App() {
 
       const stakePubkey = asPublicKey(target);
       const accountInfo = await connection.getAccountInfo(stakePubkey, 'confirmed');
+      const parsedInfo = await connection.getParsedAccountInfo(stakePubkey, 'confirmed').catch(() => null);
 
       if (!accountInfo) throw new Error('Stake account not found. Refresh and try again.');
       if (!accountInfo.owner.equals(StakeProgram.programId)) {
@@ -823,6 +824,14 @@ export default function App() {
 
       const lamports = accountInfo.lamports;
       if (lamports <= 0) throw new Error('No lamports available to withdraw from this stake account.');
+      const rentReserveRaw = (parsedInfo?.value?.data as any)?.parsed?.info?.meta?.rentExemptReserve;
+      const rentReserve = Number(rentReserveRaw ?? 0);
+      const withdrawLamports = Number.isFinite(rentReserve) && rentReserve > 0
+        ? Math.max(0, lamports - Math.floor(rentReserve))
+        : lamports;
+      if (withdrawLamports <= 0) {
+        throw new Error('No withdrawable lamports yet. Wait for full deactivation and refresh.');
+      }
 
       setStatus('Submitting withdraw transaction...');
       const tx = await buildWithdrawStakeTx({
@@ -830,7 +839,7 @@ export default function App() {
         owner: asPublicKey(wallet),
         stakeAccount: asPublicKey(target),
         to: asPublicKey(wallet),
-        lamports,
+        lamports: withdrawLamports,
       });
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
