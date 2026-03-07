@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
-const APP_VERSION_LABEL = 'v2.14 (code 25)';
+const APP_VERSION_LABEL = 'v2.15 (code 26)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -313,7 +313,7 @@ export default function App() {
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
-  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && destinationState === 'undelegated';
+  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && destinationState !== 'active' && destinationState !== 'deactivating';
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
@@ -637,32 +637,11 @@ export default function App() {
       setStatus('Checking stake account withdraw eligibility...');
 
       const stakePubkey = asPublicKey(destination);
-      const [epochInfo, accountInfo, parsedInfo] = await Promise.all([
-        connection.getEpochInfo('confirmed'),
-        connection.getAccountInfo(stakePubkey, 'confirmed'),
-        connection.getParsedAccountInfo(stakePubkey, 'confirmed'),
-      ]);
+      const accountInfo = await connection.getAccountInfo(stakePubkey, 'confirmed');
 
       if (!accountInfo) throw new Error('Stake account not found. Refresh and try again.');
       if (!accountInfo.owner.equals(StakeProgram.programId)) {
         throw new Error('Selected account is not a stake account.');
-      }
-
-      const parsedType = (parsedInfo.value?.data as any)?.parsed?.type as string | undefined;
-      const isDelegated = parsedType === 'delegated';
-
-      if (isDelegated) {
-        let activationState = 'unknown';
-        try {
-          const activation = await connection.getStakeActivation(stakePubkey, 'confirmed');
-          activationState = activation.state;
-        } catch {
-          throw new Error('Could not read delegated stake activation state. Try refresh and retry.');
-        }
-
-        if (activationState !== 'inactive') {
-          throw new Error(`Stake account is ${activationState} (epoch ${epochInfo.epoch}). Wait until inactive before withdrawing.`);
-        }
       }
 
       const lamports = accountInfo.lamports;
@@ -1023,7 +1002,7 @@ export default function App() {
               <ActionButton label={busy ? 'Staking…' : 'Create + Stake'} onPress={onCreateStake} />
               <ActionButton label={busy ? 'Unstaking…' : 'Unstake'} onPress={onUnstake} />
               <ActionButton
-                label={busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (undelegated only)'}
+                label={busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
                 onPress={onWithdraw}
                 disabled={!canWithdraw}
               />
