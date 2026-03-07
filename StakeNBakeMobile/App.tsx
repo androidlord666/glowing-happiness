@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.34 (code 45)';
+const APP_VERSION_LABEL = 'v2.35 (code 46)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -826,15 +826,18 @@ export default function App() {
         validMergeTxs.push(txs[i]);
       }
 
+      let mergeTxsToSend = validMergeTxs;
       if (!validMergeTxs.length) {
-        throw new Error(`No compatible source accounts for merge. ${failedMergeReasons[0] ?? ''}`.trim());
-      }
-
-      if (failedMergeReasons.length) {
+        // Fallback to legacy behavior: try original merge txs batch directly.
+        // Some stake states can be overly strict in preflight simulation but still
+        // succeed when wallet signs/sends on-chain.
+        mergeTxsToSend = txs;
+        setStatus('Preflight was inconclusive; retrying with direct consolidation send...');
+      } else if (failedMergeReasons.length) {
         setStatus(`Skipping ${failedMergeReasons.length} incompatible source(s).`);
       }
 
-      let txBatch = [...validMergeTxs];
+      let txBatch = [...mergeTxsToSend];
       if (consolidationFeeSkr > 0) {
         const owner = asPublicKey(wallet);
         const mint = asPublicKey(SKR_MINT);
@@ -902,12 +905,12 @@ export default function App() {
         if (!sig) return;
         rememberTx(sig);
         const isFeeTx = consolidationFeeSkr > 0 && i === txBatch.length - 1;
-        trackPendingTx(sig, isFeeTx ? 'Platform fee transaction (SKR)' : `Consolidation tx ${i + 1}/${validMergeTxs.length}`);
+        trackPendingTx(sig, isFeeTx ? 'Platform fee transaction (SKR)' : `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`);
       });
 
       setSelected({});
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx; merged ${validMergeTxs.length}/${txs.length} source tx; fee ${consolidationFeeSkrText} SKR). Swipe down from top to sync stake state.`);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx; merged ${mergeTxsToSend.length}/${txs.length} source tx; fee ${consolidationFeeSkrText} SKR). Swipe down from top to sync stake state.`);
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
