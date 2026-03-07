@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
-const APP_VERSION_LABEL = 'v2.15 (code 26)';
+const APP_VERSION_LABEL = 'v2.16 (code 27)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -97,13 +97,14 @@ function actionError(prefix: string, e: any): string {
 }
 
 function presentStakeState(state?: string): string {
-  if (!state || state === 'unknown') return 'undelegated';
+  if (!state || state === 'unknown' || state === 'loading') return 'syncing';
   if (state === 'initialized') return 'undelegated';
   return state;
 }
 
 function isDelegatedState(state?: string): boolean {
-  return presentStakeState(state) === 'delegated';
+  const s = presentStakeState(state);
+  return s === 'delegated' || s === 'activating' || s === 'active' || s === 'deactivating';
 }
 
 async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
@@ -313,7 +314,7 @@ export default function App() {
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
-  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && destinationState !== 'active' && destinationState !== 'deactivating';
+  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && destinationState !== 'active' && destinationState !== 'deactivating' && destinationState !== 'activating' && destinationState !== 'syncing';
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
@@ -487,7 +488,7 @@ export default function App() {
       );
 
       // Fast path: render accounts first, then lazily hydrate stake state metadata.
-      const seeded = items.map((a) => ({ ...a, stakeState: a.stakeState ?? 'loading' }));
+      const seeded = items.map((a) => ({ ...a, stakeState: a.stakeState ?? 'syncing' }));
       setRpcHealth('healthy');
       lastStakeAccountsRef.current = seeded;
       setStakeAccounts(seeded);
@@ -1014,7 +1015,7 @@ export default function App() {
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
             {!!destinationOrderedAccounts.length && (
-              <Text style={styles.meta}>Undelegated (ready to withdraw): {undelegatedAccounts.length} · Delegated: {delegatedAccounts.length}</Text>
+              <Text style={styles.meta}>Undelegated (ready): {undelegatedAccounts.length} · Delegated/activating: {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
             )}
             <FlatList
               data={destinationOrderedAccounts}
