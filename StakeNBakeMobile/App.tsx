@@ -110,14 +110,18 @@ function presentStakeState(state?: string): string {
 
 function displayStakeState(state?: string): string {
   const s = presentStakeState(state);
-  if (s === 'undelegated') return 'Undelegated';
+  if (s === 'undelegated') return 'Undelegated (withdraw-ready)';
   if (s === 'active') return 'Active';
-  if (s === 'activating') return 'Activating';
-  if (s === 'deactivating') return 'Deactivating';
-  if (s === 'inactive') return 'Inactive';
+  if (s === 'activating') return 'Activating (can unstake)';
+  if (s === 'deactivating') return 'Deactivating (wait epoch)';
+  if (s === 'inactive') return 'Inactive (withdraw-ready)';
   if (s === 'delegated') return 'Delegated';
   if (s === 'syncing') return 'Syncing';
   return s;
+}
+
+function isInactiveState(state?: string): boolean {
+  return presentStakeState(state) === 'inactive';
 }
 
 function isDelegatedState(state?: string): boolean {
@@ -1537,7 +1541,12 @@ export default function App() {
                 />
               </View>
             </View>
-            <Text style={styles.meta}>Withdraw status (on-chain): {destination ? displayStakeState(destinationState) : 'Select destination'}</Text>
+            <Text style={styles.meta}>
+              Withdraw status (on-chain):{' '}
+              <Text style={destination && isInactiveState(destinationState) ? styles.stateInactive : undefined}>
+                {destination ? displayStakeState(destinationState) : 'Select destination'}
+              </Text>
+            </Text>
             <Text style={styles.meta}>Withdraw is enabled only when state is Undelegated or Inactive.</Text>
 
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
@@ -1566,7 +1575,7 @@ export default function App() {
                     style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
                     onPress={() => setDestination(a.pubkey)}
                   >
-                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {displayStakeState(a.stakeState)}
+                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · <Text style={isInactiveState(a.stakeState) ? styles.stateInactive : undefined}>{displayStakeState(a.stakeState)}</Text>
                   </Text>
                 );
               }}
@@ -1612,7 +1621,7 @@ export default function App() {
                       setSelected(next);
                     }}
                   >
-                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {displayStakeState(a.stakeState)}
+                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · <Text style={isInactiveState(a.stakeState) ? styles.stateInactive : undefined}>{displayStakeState(a.stakeState)}</Text>
                   </Text>
                 );
               }}
@@ -2050,6 +2059,7 @@ const styles = StyleSheet.create({
   },
   qrWrap: { alignItems: 'center', marginVertical: 8 },
   meta: { color: colors.muted },
+  stateInactive: { color: colors.primary, fontWeight: '700' },
   account: { color: colors.text, paddingVertical: 6 },
   accountLight: { color: '#072225' },
   accountSelected: { color: colors.primary },
