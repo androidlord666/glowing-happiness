@@ -108,6 +108,18 @@ function presentStakeState(state?: string): string {
   return state;
 }
 
+function displayStakeState(state?: string): string {
+  const s = presentStakeState(state);
+  if (s === 'undelegated') return 'Undelegated';
+  if (s === 'active') return 'Active';
+  if (s === 'activating') return 'Activating';
+  if (s === 'deactivating') return 'Deactivating';
+  if (s === 'inactive') return 'Inactive';
+  if (s === 'delegated') return 'Delegated';
+  if (s === 'syncing') return 'Syncing';
+  return s;
+}
+
 function isDelegatedState(state?: string): boolean {
   const s = presentStakeState(state);
   return s === 'delegated' || s === 'activating' || s === 'active' || s === 'deactivating';
@@ -1500,14 +1512,15 @@ export default function App() {
                 />
               </View>
             </View>
-            <Text style={styles.meta}>Withdraw status: {destination ? destinationState : 'select destination'}</Text>
+            <Text style={styles.meta}>Withdraw status (on-chain): {destination ? displayStakeState(destinationState) : 'Select destination'}</Text>
+            <Text style={styles.meta}>Withdraw is enabled only when state is Undelegated or Inactive.</Text>
 
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
             {!!destinationOrderedAccounts.length && (
-            <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Undelegated/inactive: {undelegatedAccounts.length} · Delegated(active/transition): {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
+            <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Undelegated/Inactive: {undelegatedAccounts.length} · Delegated (Active/Activating/Deactivating): {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
             )}
             {!!withdrawReadyAccounts.length && (
               <Text style={styles.link} onPress={() => setDestination(withdrawReadyAccounts[0].pubkey)}>
@@ -1528,7 +1541,7 @@ export default function App() {
                     style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
                     onPress={() => setDestination(a.pubkey)}
                   >
-                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {presentStakeState(a.stakeState)}
+                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {displayStakeState(a.stakeState)}
                   </Text>
                 );
               }}
@@ -1574,7 +1587,7 @@ export default function App() {
                       setSelected(next);
                     }}
                   >
-                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {presentStakeState(a.stakeState)}
+                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {displayStakeState(a.stakeState)}
                   </Text>
                 );
               }}
