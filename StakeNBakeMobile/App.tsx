@@ -48,7 +48,13 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
+const APP_VERSION_LABEL = 'v2.9 (code 20)';
 const MAX_SOURCE_ACCOUNTS = 99;
+
+// Feature flags (fast emergency toggles)
+const FEATURE_FEE_ENABLED = true;
+const FEATURE_WITHDRAW_ENABLED = true;
+
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
 const PLATFORM_FEE_PER_SOURCE_SKR = 25;
@@ -160,6 +166,7 @@ export default function App() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [confirmConsolidate, setConfirmConsolidate] = useState(false);
   const [showFeePolicy, setShowFeePolicy] = useState(false);
+  const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
@@ -286,11 +293,10 @@ export default function App() {
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
-  const canWithdraw = !busy && !!destination && destinationState === 'undelegated';
-  const consolidationFeeSkr = Math.min(
-    selectedCount * PLATFORM_FEE_PER_SOURCE_SKR,
-    PLATFORM_FEE_CAP_SKR
-  );
+  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && destinationState === 'undelegated';
+  const consolidationFeeSkr = FEATURE_FEE_ENABLED
+    ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
+    : 0;
   const consolidationFeeSkrText = consolidationFeeSkr.toFixed(2);
 
   const rememberTx = (sig: string) => {
@@ -407,6 +413,7 @@ export default function App() {
       const session = await walletAdapter.connect(cluster);
       setWallet(session.address);
       setScreen('app');
+      setShowWhatsNew(true);
       setStatus('Wallet connected.');
       await loadStakeAccounts(session.address);
       await refreshWalletBalances(session.address);
@@ -836,6 +843,7 @@ export default function App() {
 
     const report = {
       app: 'stakeNbake',
+      version: APP_VERSION_LABEL,
       cluster,
       explorer,
       mode,
@@ -853,6 +861,32 @@ export default function App() {
 
     Clipboard.setString(JSON.stringify(report, null, 2));
     setStatus('Debug report copied to clipboard.');
+  };
+
+  const copySupportBundle = () => {
+    const payload = {
+      app: 'stakeNbake',
+      version: APP_VERSION_LABEL,
+      features: {
+        feeEnabled: FEATURE_FEE_ENABLED,
+        withdrawEnabled: FEATURE_WITHDRAW_ENABLED,
+      },
+      feePolicy: {
+        token: 'SKR',
+        mint: SKR_MINT,
+        perSource: PLATFORM_FEE_PER_SOURCE_SKR,
+        cap: PLATFORM_FEE_CAP_SKR,
+        collector: PLATFORM_FEE_WALLET,
+      },
+      status,
+      lastSignature,
+      recentTxs: txHistory,
+      wallet,
+      destination,
+      timestamp: new Date().toISOString(),
+    };
+    Clipboard.setString(JSON.stringify(payload, null, 2));
+    setStatus('Support bundle copied.');
   };
 
   if (screen === 'splash') {
@@ -1111,8 +1145,10 @@ export default function App() {
             </View>
           )}
 
+          <ActionButton label="What's New" onPress={() => setShowWhatsNew(true)} />
           <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
           <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
+          <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
 
         </View>
       )}
@@ -1148,11 +1184,25 @@ export default function App() {
             <Text style={styles.label}>Fee Policy</Text>
             <Text style={styles.meta}>Token: SKR only</Text>
             <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
-            <Text style={styles.meta}>Formula: 10 SKR × source accounts</Text>
-            <Text style={styles.meta}>Cap: 100 SKR per consolidation</Text>
+            <Text style={styles.meta}>Formula: {PLATFORM_FEE_PER_SOURCE_SKR} SKR × source accounts</Text>
+            <Text style={styles.meta}>Cap: {PLATFORM_FEE_CAP_SKR} SKR per consolidation</Text>
             <Text style={styles.meta}>Collector wallet: {PLATFORM_FEE_WALLET}</Text>
             <Text style={styles.meta}>No hidden fees.</Text>
             <ActionButton label="Close" onPress={() => setShowFeePolicy(false)} />
+          </View>
+        </View>
+      )}
+
+      {showWhatsNew && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.label}>What's New · {APP_VERSION_LABEL}</Text>
+            <Text style={styles.meta}>• SKR-only consolidation fee model</Text>
+            <Text style={styles.meta}>• Fee policy + no-hidden-fees transparency</Text>
+            <Text style={styles.meta}>• Withdraw flow and undelegated handling improved</Text>
+            <Text style={styles.meta}>• Wallet box now shows SOL and SKR balances</Text>
+            <Text style={styles.meta}>• Lifecycle/app-switch stability hardening</Text>
+            <ActionButton label="Close" onPress={() => setShowWhatsNew(false)} />
           </View>
         </View>
       )}
