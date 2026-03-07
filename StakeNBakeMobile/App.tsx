@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.36 (code 47)';
+const APP_VERSION_LABEL = 'v2.37 (code 48)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -1496,9 +1496,13 @@ export default function App() {
         {mode === 'receive' && (
           <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Receive</Text>
-            <View style={styles.row}>
-              <ActionButton label="Copy Address" onPress={copyWalletAddress} />
-              <ActionButton label={showQr ? 'Hide QR' : 'Show QR'} onPress={() => setShowQr((v) => !v)} />
+            <View style={styles.swapActionRow}>
+              <Pressable style={styles.swapActionBtn} onPress={copyWalletAddress}>
+                <Text style={styles.swapActionBtnText}>Copy Address</Text>
+              </Pressable>
+              <Pressable style={styles.swapActionBtn} onPress={() => setShowQr((v) => !v)}>
+                <Text style={styles.swapActionBtnText}>{showQr ? 'Hide QR' : 'Show QR'}</Text>
+              </Pressable>
             </View>
             <Text style={styles.meta}>{wallet}</Text>
             {showQr && (
