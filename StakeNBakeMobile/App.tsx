@@ -936,33 +936,29 @@ export default function App() {
         ? Math.min(mergeTxsToSend.length * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
         : 0;
 
-      // Fee must be paid for every consolidation run; enforce this before merge submission.
-      let feeSig = '';
-      if (chargedFeeSkr > 0) {
+      // Bundle fee instructions into consolidation txs so signature flow stays unified.
+      let feeBundle:
+        | {
+            mint: ReturnType<typeof asPublicKey>;
+            ownerAta: ReturnType<typeof getAssociatedTokenAddressSync>;
+            feeAta: ReturnType<typeof getAssociatedTokenAddressSync>;
+            perTxRaw: bigint[];
+          }
+        | null = null;
+      if (chargedFeeSkr > 0 && mergeTxsToSend.length > 0) {
         const mint = asPublicKey(SKR_MINT);
         const feeWallet = asPublicKey(PLATFORM_FEE_WALLET);
         const ownerAta = getAssociatedTokenAddressSync(mint, owner);
         const feeAta = getAssociatedTokenAddressSync(mint, feeWallet);
         const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
-        const rawAmount = BigInt(Math.round(chargedFeeSkr * Math.pow(10, decimals)));
-
-        const recent = await connection.getLatestBlockhash('confirmed');
-        const feeTx = new Transaction({
-          feePayer: owner,
-          blockhash: recent.blockhash,
-          lastValidBlockHeight: recent.lastValidBlockHeight,
+        const totalRaw = BigInt(Math.round(chargedFeeSkr * Math.pow(10, decimals)));
+        const txCount = mergeTxsToSend.length;
+        const base = totalRaw / BigInt(txCount);
+        const rem = totalRaw % BigInt(txCount);
+        const perTxRaw = Array.from({ length: txCount }, (_, i) => {
+          return base + (BigInt(i) < rem ? 1n : 0n);
         });
-
-        feeTx.add(createAssociatedTokenAccountIdempotentInstruction(owner, feeAta, feeWallet, mint));
-        feeTx.add(createTransferInstruction(ownerAta, feeAta, owner, rawAmount));
-
-        setStatus('Submitting required platform fee transaction...');
-        const feeSigs = await walletAdapter.signAndSendTransactions([feeTx]);
-        feeSig = feeSigs[0] ?? '';
-        if (!feeSig) throw new Error('Fee transaction was not signed/submitted. Consolidation aborted.');
-        rememberTx(feeSig);
-        trackPendingTx(feeSig, 'Platform fee transaction (SKR)');
-        await connection.confirmTransaction(feeSig, 'confirmed');
+        feeBundle = { mint, ownerAta, feeAta, perTxRaw };
       }
 
       if (delegateTx) {
@@ -987,11 +983,28 @@ export default function App() {
         for (let c = 0; c < batchChunks.length; c++) {
           const txChunk = batchChunks[c];
           const preparedChunk = await Promise.all(
-            txChunk.map(async (tx) => {
+            txChunk.map(async (tx, idxInChunk) => {
               const recent = await connection.getLatestBlockhash('confirmed');
               tx.recentBlockhash = recent.blockhash;
               tx.lastValidBlockHeight = recent.lastValidBlockHeight;
               tx.feePayer = owner;
+              const txIndex = globalIdx + idxInChunk;
+              if (feeBundle) {
+                if (txIndex === 0) {
+                  tx.add(
+                    createAssociatedTokenAccountIdempotentInstruction(
+                      owner,
+                      feeBundle.feeAta,
+                      asPublicKey(PLATFORM_FEE_WALLET),
+                      feeBundle.mint
+                    )
+                  );
+                }
+                const raw = feeBundle.perTxRaw[txIndex] ?? 0n;
+                if (raw > 0n) {
+                  tx.add(createTransferInstruction(feeBundle.ownerAta, feeBundle.feeAta, owner, raw));
+                }
+              }
               return tx;
             })
           );
@@ -1028,6 +1041,22 @@ export default function App() {
             tx.recentBlockhash = recent.blockhash;
             tx.lastValidBlockHeight = recent.lastValidBlockHeight;
             tx.feePayer = owner;
+            if (feeBundle) {
+              if (i === 0) {
+                tx.add(
+                  createAssociatedTokenAccountIdempotentInstruction(
+                    owner,
+                    feeBundle.feeAta,
+                    asPublicKey(PLATFORM_FEE_WALLET),
+                    feeBundle.mint
+                  )
+                );
+              }
+              const raw = feeBundle.perTxRaw[i] ?? 0n;
+              if (raw > 0n) {
+                tx.add(createTransferInstruction(feeBundle.ownerAta, feeBundle.feeAta, owner, raw));
+              }
+            }
 
             setStatus(`Submitting consolidation tx ${i + 1}/${mergeTxsToSend.length}...`);
             const sigs = await walletAdapter.signAndSendTransactions([tx]);
