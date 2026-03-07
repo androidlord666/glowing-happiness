@@ -15,7 +15,7 @@ import {
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
-import { LAMPORTS_PER_SOL, StakeProgram } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, StakeProgram, SystemProgram, Transaction } from '@solana/web3.js';
 import { ActionButton } from './src/components/ActionButton';
 import { createConnection, fetchStakeAccounts, StakeAccountInfo } from './src/lib/solana';
 import {
@@ -42,6 +42,9 @@ type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
 const MAX_SOURCE_ACCOUNTS = 99;
+const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
+const PLATFORM_FEE_PER_SOURCE_LAMPORTS = 150000; // 0.00015 SOL
+const PLATFORM_FEE_CAP_LAMPORTS = 1500000; // 0.0015 SOL
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -233,6 +236,11 @@ export default function App() {
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
+  const consolidationFeeLamports = Math.min(
+    selectedCount * PLATFORM_FEE_PER_SOURCE_LAMPORTS,
+    PLATFORM_FEE_CAP_LAMPORTS
+  );
+  const consolidationFeeSol = (consolidationFeeLamports / LAMPORTS_PER_SOL).toFixed(6);
 
   const rememberTx = (sig: string) => {
     setLastSignature(sig);
@@ -566,16 +574,34 @@ export default function App() {
         },
       });
 
-      setStatus(`Submitting consolidation transactions (${txs.length})...`);
-      const sigs = await walletAdapter.signAndSendTransactions(txs);
+      let txBatch = [...txs];
+      if (consolidationFeeLamports > 0) {
+        const recent = await connection.getLatestBlockhash('confirmed');
+        const feeTx = new Transaction({
+          feePayer: asPublicKey(wallet),
+          blockhash: recent.blockhash,
+          lastValidBlockHeight: recent.lastValidBlockHeight,
+        }).add(
+          SystemProgram.transfer({
+            fromPubkey: asPublicKey(wallet),
+            toPubkey: asPublicKey(PLATFORM_FEE_WALLET),
+            lamports: consolidationFeeLamports,
+          })
+        );
+        txBatch = [...txBatch, feeTx];
+      }
+
+      setStatus(`Submitting consolidation transactions (${txBatch.length})...`);
+      const sigs = await walletAdapter.signAndSendTransactions(txBatch);
       sigs.forEach((sig, i) => {
         if (!sig) return;
         rememberTx(sig);
-        trackPendingTx(sig, `Consolidation tx ${i + 1}/${txs.length}`);
+        const isFeeTx = consolidationFeeLamports > 0 && i === txBatch.length - 1;
+        trackPendingTx(sig, isFeeTx ? 'Platform fee transaction' : `Consolidation tx ${i + 1}/${txs.length}`);
       });
 
       setSelected({});
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txs.length} tx). Refreshing accounts...`);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx, fee ${consolidationFeeSol} SOL). Refreshing accounts...`);
       await refreshSoon();
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
@@ -770,6 +796,7 @@ export default function App() {
 
             <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
+            <Text style={styles.meta}>Platform fee: {consolidationFeeSol} SOL (supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
               <ActionButton label={`Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'all' ? 'mergeable' : f === 'mergeable' ? 'high' : 'all')} />
               <ActionButton label="Select all valid" onPress={selectAllValidSources} disabled={busy || filteredSourceStakeAccounts.length === 0} />
@@ -904,6 +931,8 @@ export default function App() {
             <Text style={styles.label}>Confirm consolidation</Text>
             <Text style={styles.meta}>Destination: {shortAddr(destination)}</Text>
             <Text style={styles.meta}>Sources: {selectedCount}</Text>
+            <Text style={styles.meta}>Platform fee: {consolidationFeeSol} SOL</Text>
+            <Text style={styles.meta}>Fee wallet: {shortAddr(PLATFORM_FEE_WALLET)}</Text>
             <View style={styles.row}>
               <ActionButton label="Cancel" onPress={() => setConfirmConsolidate(false)} />
               <ActionButton
