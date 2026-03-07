@@ -129,8 +129,9 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: stakeNbake-release-apk
+          if-no-files-found: error
           path: |
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk.sha256
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release-v*-code*.apk
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release-v*-code*.apk.sha256
+            android/app/build/outputs/apk/release/app-release.apk
+            android/app/build/outputs/apk/release/app-release.apk.sha256
+            android/app/build/outputs/apk/release/app-release-v*-code*.apk
+            android/app/build/outputs/apk/release/app-release-v*-code*.apk.sha256
