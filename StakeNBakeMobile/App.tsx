@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.22 (code 33)';
+const APP_VERSION_LABEL = 'v2.23 (code 34)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -173,6 +173,7 @@ export default function App() {
   const [swapQuoteText, setSwapQuoteText] = useState('');
   const [swapQuote, setSwapQuote] = useState<any>(null);
   const [swapBusy, setSwapBusy] = useState(false);
+  const [skrDecimals, setSkrDecimals] = useState(9);
   const [snsPreview, setSnsPreview] = useState('');
   const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -280,6 +281,19 @@ export default function App() {
     setSwapQuote(null);
     setSwapQuoteText('');
   }, [swapDir, swapAmount, swapSlippageBps]);
+
+  useEffect(() => {
+    const loadMintDecimals = async () => {
+      try {
+        const info = await connection.getParsedAccountInfo(asPublicKey(SKR_MINT), 'confirmed');
+        const d = Number((info.value?.data as any)?.parsed?.info?.decimals ?? 9);
+        if (Number.isFinite(d)) setSkrDecimals(d);
+      } catch {
+        setSkrDecimals(9);
+      }
+    };
+    loadMintDecimals();
+  }, [connection]);
 
   useEffect(() => {
     if (!status) return;
@@ -831,7 +845,7 @@ export default function App() {
 
       const inputMint = swapDir === 'SOL_TO_SKR' ? SOL_MINT : SKR_MINT;
       const outputMint = swapDir === 'SOL_TO_SKR' ? SKR_MINT : SOL_MINT;
-      const decimalsIn = 9;
+      const decimalsIn = swapDir === 'SOL_TO_SKR' ? 9 : skrDecimals;
       const raw = Math.floor(amountNum * Math.pow(10, decimalsIn));
 
       const url = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${raw}&slippageBps=${swapSlippageBps}`;
@@ -841,7 +855,8 @@ export default function App() {
       setSwapQuote(q);
       const outRaw = Number(q?.outAmount ?? 0);
       if (!outRaw) throw new Error('No quote output amount');
-      const outUi = outRaw / Math.pow(10, 9);
+      const decimalsOut = swapDir === 'SOL_TO_SKR' ? skrDecimals : 9;
+      const outUi = outRaw / Math.pow(10, decimalsOut);
       const outSym = swapDir === 'SOL_TO_SKR' ? 'SKR' : 'SOL';
       setSwapQuoteText(`Quote: ~${outUi.toFixed(6)} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
     } catch (e: any) {
@@ -894,10 +909,7 @@ export default function App() {
     }
   };
 
-  const openJupiterSwap = async () => {
-    const pair = swapDir === 'SOL_TO_SKR' ? `${SOL_MINT}-${SKR_MINT}` : `${SKR_MINT}-${SOL_MINT}`;
-    await Linking.openURL(`https://jup.ag/swap/${pair}`);
-  };
+
 
   const onSend = async () => {
     if (busy) return;
@@ -1263,10 +1275,9 @@ export default function App() {
             <View style={styles.row}>
               <ActionButton label={swapBusy ? 'Quoting…' : 'Get Quote'} onPress={fetchSwapQuote} />
               <ActionButton label={swapBusy ? 'Swapping…' : 'Swap Now'} onPress={executeSwapInApp} />
-              <ActionButton label="Jupiter Web" onPress={openJupiterSwap} />
             </View>
-            {!!swapQuoteText && <Text style={styles.meta}>{swapQuoteText}</Text>}
-            <Text style={styles.meta}>Swap executes in-app via Jupiter tx; web button is fallback.</Text>
+            {!!swapQuoteText && <Text style={styles.swapQuote}>{swapQuoteText}</Text>}
+            <Text style={styles.meta}>Swap executes in-app via Jupiter transaction.</Text>
           </Animated.View>
         )}
 
@@ -1574,6 +1585,7 @@ const styles = StyleSheet.create({
   accountDestination: { color: colors.secondary },
   status: { color: colors.secondary, marginTop: 10 },
   link: { color: colors.primary, textDecorationLine: 'underline', marginTop: 6 },
+  swapQuote: { color: '#14F195', fontWeight: '700', marginTop: 4 },
   confirmOverlay: {
     position: 'absolute',
     left: 0,
