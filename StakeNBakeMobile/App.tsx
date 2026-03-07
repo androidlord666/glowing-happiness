@@ -882,7 +882,19 @@ export default function App() {
         delegationVote: destinationAccount.delegationVote,
         delegationState: destinationAccount.stakeState,
       };
-      const eligibleSourceKeys = sourceSelectedKeys;
+      const incompatibleCount = sourceSelectedKeys.filter((k) => {
+        const src = stakeMap.get(k);
+        return !isMergeStateCompatible(destMeta.delegationState, src?.stakeState);
+      }).length;
+      const eligibleSourceKeys = sourceSelectedKeys.filter((k) => {
+        const src = stakeMap.get(k);
+        return isMergeStateCompatible(destMeta.delegationState, src?.stakeState);
+      });
+      if (eligibleSourceKeys.length === 0) {
+        suppressNextStatusModalRef.current = true;
+        setStatus('No compatible source accounts selected for this destination state.');
+        return;
+      }
 
       const owner = asPublicKey(wallet);
       // Delegate-in-consolidation has proven brittle across stake-state transitions.
@@ -1058,6 +1070,7 @@ export default function App() {
       setSelected({});
       await refreshWalletBalances(wallet);
       const notes: string[] = [];
+      if (incompatibleCount > 0) notes.push(`skipped ${incompatibleCount} incompatible`);
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
       setStatus(`✅ Consolidation submitted (${submittedMergeSigs.length} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
@@ -1067,6 +1080,8 @@ export default function App() {
       setStatus('Consolidation not submitted. Please try again.');
     } finally {
       setBusy(false);
+      // Prevent stale incompatible selections from poisoning the next run.
+      setSelected({});
     }
   };
 
