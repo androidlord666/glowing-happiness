@@ -869,7 +869,9 @@ export default function App() {
       }
 
       const owner = asPublicKey(wallet);
-      const includeDelegateTx = !isDelegatedState(destMeta.delegationState);
+      // Delegate-in-consolidation has proven brittle across stake-state transitions.
+      // Consolidation should only merge compatible existing stake accounts.
+      const includeDelegateTx = false;
       setStatus('Building consolidation transactions...');
       const txs = await buildConsolidationTransactions({
         connection,
