@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.33 (code 44)';
+const APP_VERSION_LABEL = 'v2.34 (code 45)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -423,8 +423,7 @@ export default function App() {
       setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
       setWalletSkrBalance(skrBal?.value?.uiAmountString ?? '0');
     } catch {
-      setWalletSolBalance('—');
-      setWalletSkrBalance('—');
+      // keep last-known balances to avoid flicker/disappearing values
     }
   };
 
@@ -435,7 +434,7 @@ export default function App() {
     // Make pull-to-refresh feel snappy; finish spinner early while sync continues.
     const fallback = setTimeout(() => setPullRefreshing(false), 1800);
     try {
-      await loadStakeAccounts(wallet, { skipBalances: true });
+      await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } finally {
       clearTimeout(fallback);
       setPullRefreshing(false);
@@ -487,11 +486,7 @@ export default function App() {
   }, []);
 
   useEffect(() => {
-    if (!isAppActive) return;
-    if (!wallet) return;
-    loadStakeAccounts(wallet).catch(() => {});
-    refreshWalletBalances(wallet).catch(() => {});
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // No auto-refresh on app switch; manual swipe-down refresh only.
   }, [isAppActive]);
 
   useEffect(() => {
@@ -560,7 +555,7 @@ export default function App() {
     setScreen('landing');
   };
 
-  const loadStakeAccounts = async (walletOverride?: string, opts?: { skipBalances?: boolean }) => {
+  const loadStakeAccounts = async (walletOverride?: string, opts?: { skipBalances?: boolean; skipBusy?: boolean }) => {
     try {
       const activeWallet = walletOverride ?? wallet;
       if (!activeWallet) throw new Error('Connect wallet first');
@@ -575,7 +570,7 @@ export default function App() {
       }
 
       lastRefreshAtRef.current = now;
-      setBusy(true);
+      if (!opts?.skipBusy) setBusy(true);
       setStatus('Refreshing stake accounts...');
       const startedAt = Date.now();
 
@@ -642,7 +637,7 @@ export default function App() {
         setStatus(actionError('Refresh failed', e));
       }
     } finally {
-      setBusy(false);
+      if (!opts?.skipBusy) setBusy(false);
     }
   };
 
@@ -1314,12 +1309,20 @@ export default function App() {
               keyboardType="decimal-pad"
             />
             <View style={styles.row}>
-              <ActionButton label={busy ? 'Staking…' : 'Create + Stake'} onPress={onCreateStake} />
-              <ActionButton label={busy ? 'Unstaking…' : 'Unstake'} onPress={onUnstake} />
               <ActionButton
-                label={busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
+                label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create + Stake'}
+                onPress={onCreateStake}
+                disabled={pullRefreshing}
+              />
+              <ActionButton
+                label={pullRefreshing ? 'Refreshing…' : busy ? 'Unstaking…' : 'Unstake'}
+                onPress={onUnstake}
+                disabled={pullRefreshing}
+              />
+              <ActionButton
+                label={pullRefreshing ? 'Refreshing…' : busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
                 onPress={onWithdraw}
-                disabled={!canWithdraw}
+                disabled={!canWithdraw || pullRefreshing}
               />
             </View>
             <Text style={styles.meta}>Withdraw status: {destination ? destinationState : 'select destination'}</Text>
@@ -1358,9 +1361,9 @@ export default function App() {
 
             <View style={styles.row}>
               <ActionButton
-                label={busy ? 'Consolidating…' : 'Consolidate'}
+                label={pullRefreshing ? 'Refreshing…' : busy ? 'Consolidating…' : 'Consolidate'}
                 onPress={() => setConfirmConsolidate(true)}
-                disabled={!canConsolidate}
+                disabled={!canConsolidate || pullRefreshing}
               />
             </View>
             <Text style={styles.meta}>Swipe down from top near Mainnet to refresh.</Text>
@@ -1369,8 +1372,8 @@ export default function App() {
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only · supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
-              <ActionButton label={`Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'high' ? 'low' : f === 'low' ? 'all' : 'high')} />
-              <ActionButton label={allFilteredSelected ? 'Deselect all' : 'Select all'} onPress={selectAllValidSources} disabled={busy || filteredSourceStakeAccounts.length === 0} />
+              <ActionButton label={pullRefreshing ? 'Refreshing…' : `Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'high' ? 'low' : f === 'low' ? 'all' : 'high')} disabled={pullRefreshing} />
+              <ActionButton label={pullRefreshing ? 'Refreshing…' : (allFilteredSelected ? 'Deselect all' : 'Select all')} onPress={selectAllValidSources} disabled={busy || pullRefreshing || filteredSourceStakeAccounts.length === 0} />
             </View>
             {filteredSourceStakeAccounts.length === 0 && (
               <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>
