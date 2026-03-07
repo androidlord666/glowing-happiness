@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.23 (code 34)';
+const APP_VERSION_LABEL = 'v2.24 (code 35)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -57,6 +57,7 @@ const FEATURE_WITHDRAW_ENABLED = true;
 
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
+const SKR_FALLBACK_DECIMALS = 6;
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
 const PLATFORM_FEE_PER_SOURCE_SKR = 10;
@@ -173,7 +174,7 @@ export default function App() {
   const [swapQuoteText, setSwapQuoteText] = useState('');
   const [swapQuote, setSwapQuote] = useState<any>(null);
   const [swapBusy, setSwapBusy] = useState(false);
-  const [skrDecimals, setSkrDecimals] = useState(9);
+  const [skrDecimals, setSkrDecimals] = useState(SKR_FALLBACK_DECIMALS);
   const [snsPreview, setSnsPreview] = useState('');
   const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
   const [showQr, setShowQr] = useState(false);
@@ -286,10 +287,11 @@ export default function App() {
     const loadMintDecimals = async () => {
       try {
         const info = await connection.getParsedAccountInfo(asPublicKey(SKR_MINT), 'confirmed');
-        const d = Number((info.value?.data as any)?.parsed?.info?.decimals ?? 9);
+        const d = Number((info.value?.data as any)?.parsed?.info?.decimals ?? SKR_FALLBACK_DECIMALS);
         if (Number.isFinite(d)) setSkrDecimals(d);
+        else setSkrDecimals(SKR_FALLBACK_DECIMALS);
       } catch {
-        setSkrDecimals(9);
+        setSkrDecimals(SKR_FALLBACK_DECIMALS);
       }
     };
     loadMintDecimals();
@@ -1277,7 +1279,7 @@ export default function App() {
               <ActionButton label={swapBusy ? 'Swapping…' : 'Swap Now'} onPress={executeSwapInApp} />
             </View>
             {!!swapQuoteText && <Text style={styles.swapQuote}>{swapQuoteText}</Text>}
-            <Text style={styles.meta}>Swap executes in-app via Jupiter transaction.</Text>
+            <Text style={styles.meta}>SKR decimals: {skrDecimals} · Swap executes in-app via Jupiter transaction.</Text>
           </Animated.View>
         )}
 
