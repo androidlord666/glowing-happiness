@@ -68,8 +68,10 @@ jest.mock('@solana/web3.js', () => {
 });
 
 jest.mock('@solana/spl-token', () => ({
+  createAssociatedTokenAccountIdempotentInstruction: jest.fn(),
   createAssociatedTokenAccountInstruction: jest.fn(),
   createTransferCheckedInstruction: jest.fn(),
+  createTransferInstruction: jest.fn(),
   getAssociatedTokenAddressSync: jest.fn(() => 'mock-ata'),
 }));
 

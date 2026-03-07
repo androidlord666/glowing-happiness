@@ -21,7 +21,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
-  createAssociatedTokenAccountInstruction,
+  createAssociatedTokenAccountIdempotentInstruction,
   createTransferInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
@@ -953,11 +953,7 @@ export default function App() {
           lastValidBlockHeight: recent.lastValidBlockHeight,
         });
 
-        const feeAtaInfo = await connection.getAccountInfo(feeAta, 'confirmed');
-        if (!feeAtaInfo) {
-          feeTx.add(createAssociatedTokenAccountInstruction(owner, feeAta, feeWallet, mint));
-        }
-
+        feeTx.add(createAssociatedTokenAccountIdempotentInstruction(owner, feeAta, feeWallet, mint));
         feeTx.add(createTransferInstruction(ownerAta, feeAta, owner, rawAmount));
 
         setStatus('Submitting required platform fee transaction...');
