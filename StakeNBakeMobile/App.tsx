@@ -14,6 +14,7 @@ import {
   Image,
   FlatList,
   AppState,
+  RefreshControl,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -48,7 +49,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.27 (code 38)';
+const APP_VERSION_LABEL = 'v2.28 (code 39)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -206,6 +207,8 @@ export default function App() {
   const [showFeePolicy, setShowFeePolicy] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [showTips, setShowTips] = useState(false);
+  const [showStatusModal, setShowStatusModal] = useState(false);
+  const [pullRefreshing, setPullRefreshing] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
@@ -330,8 +333,10 @@ export default function App() {
 
   useEffect(() => {
     if (!status) return;
-    const t = setTimeout(() => setStatus(''), 6000);
-    return () => clearTimeout(t);
+    const s = status.toLowerCase();
+    if (s.includes('error') || s.includes('failed') || s.includes('issue')) {
+      setShowStatusModal(true);
+    }
   }, [status]);
 
   const delegatedAccounts = useMemo(
@@ -410,6 +415,16 @@ export default function App() {
     } catch {
       setWalletSolBalance('—');
       setWalletSkrBalance('—');
+    }
+  };
+
+  const onPullRefresh = async () => {
+    if (!wallet) return;
+    setPullRefreshing(true);
+    try {
+      await loadStakeAccounts(wallet);
+    } finally {
+      setPullRefreshing(false);
     }
   };
 
@@ -1192,7 +1207,16 @@ export default function App() {
   return (
     <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
-      <ScrollView contentContainerStyle={styles.content}>
+      <ScrollView
+        contentContainerStyle={styles.content}
+        refreshControl={
+          <RefreshControl
+            refreshing={pullRefreshing}
+            onRefresh={onPullRefresh}
+            tintColor={palette.primary}
+          />
+        }
+      >
         <View style={styles.headerCenter}>
           <Image source={theme === 'light' ? solanaMobileBlackLogo : solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
         </View>
@@ -1423,7 +1447,7 @@ export default function App() {
           </Animated.View>
         )}
 
-        <Text style={styles.status}>{status}</Text>
+        {!!status && <Text style={styles.statusMuted}>{status}</Text>
         {!!lastSignature && (
           <View>
             <Text style={styles.meta}>Latest tx: {shortAddr(lastSignature)}</Text>
@@ -1500,6 +1524,16 @@ export default function App() {
                 disabled={busy}
               />
             </View>
+          </View>
+        </View>
+      )}
+
+      {showStatusModal && !!status && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.label}>Notice</Text>
+            <Text style={styles.meta}>{status}</Text>
+            <ActionButton label="OK" onPress={() => { setShowStatusModal(false); setStatus(''); }} />
           </View>
         </View>
       )}
@@ -1709,6 +1743,7 @@ const styles = StyleSheet.create({
   accountSelected: { color: colors.primary },
   accountDestination: { color: colors.secondary },
   status: { color: colors.secondary, marginTop: 10 },
+  statusMuted: { color: colors.secondary, marginTop: 10, opacity: 0.7 },
   link: { color: colors.primary, textDecorationLine: 'underline', marginTop: 6 },
   swapQuote: { color: '#14F195', fontWeight: '700', marginTop: 4 },
   warnText: { color: '#FFB86B', fontWeight: '700', marginTop: 4 },
