@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.24 (code 35)';
+const APP_VERSION_LABEL = 'v2.25 (code 36)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -108,6 +108,16 @@ function presentStakeState(state?: string): string {
 function isDelegatedState(state?: string): boolean {
   const s = presentStakeState(state);
   return s === 'delegated' || s === 'activating' || s === 'active' || s === 'deactivating';
+}
+
+function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
+  const n = typeof raw === 'number' ? BigInt(Math.floor(raw)) : BigInt(raw || '0');
+  const base = BigInt(10) ** BigInt(decimals);
+  const whole = n / base;
+  const frac = n % base;
+  if (decimals <= 0) return whole.toString();
+  const fracStr = frac.toString().padStart(decimals, '0').slice(0, Math.max(0, maxFrac));
+  return `${whole.toString()}.${fracStr}`.replace(/\.0+$/, '').replace(/\.$/, '');
 }
 
 async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
@@ -173,6 +183,7 @@ export default function App() {
   const [swapSlippageBps, setSwapSlippageBps] = useState(100);
   const [swapQuoteText, setSwapQuoteText] = useState('');
   const [swapQuote, setSwapQuote] = useState<any>(null);
+  const [swapQuoteAtMs, setSwapQuoteAtMs] = useState<number>(0);
   const [swapBusy, setSwapBusy] = useState(false);
   const [skrDecimals, setSkrDecimals] = useState(SKR_FALLBACK_DECIMALS);
   const [snsPreview, setSnsPreview] = useState('');
@@ -280,6 +291,7 @@ export default function App() {
 
   useEffect(() => {
     setSwapQuote(null);
+    setSwapQuoteAtMs(0);
     setSwapQuoteText('');
   }, [swapDir, swapAmount, swapSlippageBps]);
 
@@ -854,13 +866,22 @@ export default function App() {
       const res = await fetch(url, { headers: { 'x-api-key': JUPITER_API_KEY } });
       if (!res.ok) throw new Error(`Jupiter quote failed (${res.status})`);
       const q: any = await res.json();
+      const inRaw = BigInt(String(q?.inAmount ?? '0'));
+      const outRaw = BigInt(String(q?.outAmount ?? '0'));
+      if (inRaw <= 0n || outRaw <= 0n) throw new Error('No quote output amount');
+
+      // Basic sanity guard to catch absurd quote parsing / decimal mismatch.
+      const ratePpm = Number((outRaw * 1_000_000n) / inRaw); // scaled by 1e6
+      if (!Number.isFinite(ratePpm) || ratePpm <= 0 || ratePpm > 1_000_000_000_000) {
+        throw new Error('quote anomaly, retry');
+      }
+
       setSwapQuote(q);
-      const outRaw = Number(q?.outAmount ?? 0);
-      if (!outRaw) throw new Error('No quote output amount');
+      setSwapQuoteAtMs(Date.now());
       const decimalsOut = swapDir === 'SOL_TO_SKR' ? skrDecimals : 9;
-      const outUi = outRaw / Math.pow(10, decimalsOut);
+      const outUi = formatRawAmount(outRaw.toString(), decimalsOut, 6);
       const outSym = swapDir === 'SOL_TO_SKR' ? 'SKR' : 'SOL';
-      setSwapQuoteText(`Quote: ~${outUi.toFixed(6)} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
+      setSwapQuoteText(`Quote: ~${outUi} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
     } catch (e: any) {
       setSwapQuoteText(`Quote error: ${normalizeErrorMessage(e)}`);
     } finally {
@@ -872,6 +893,10 @@ export default function App() {
     try {
       if (!wallet) throw new Error('Connect wallet first');
       if (!swapQuote) throw new Error('Get a quote first');
+      const ageMs = Date.now() - swapQuoteAtMs;
+      if (!swapQuoteAtMs || ageMs > 15000) {
+        throw new Error('Quote stale. Tap Get Quote again.');
+      }
       setSwapBusy(true);
       setStatus('Building Jupiter swap transaction...');
 
@@ -895,6 +920,16 @@ export default function App() {
 
       const raw = Buffer.from(data.swapTransaction, 'base64');
       const vtx = VersionedTransaction.deserialize(raw);
+
+      const sim = await connection.simulateTransaction(vtx, {
+        replaceRecentBlockhash: true,
+        sigVerify: false,
+        commitment: 'confirmed',
+      });
+      if (sim.value.err) {
+        throw new Error(`Swap simulation failed: ${JSON.stringify(sim.value.err)}`);
+      }
+
       const sigs = await walletAdapter.signAndSendTransactions([vtx as any]);
       if (sigs[0]) {
         rememberTx(sigs[0]);
