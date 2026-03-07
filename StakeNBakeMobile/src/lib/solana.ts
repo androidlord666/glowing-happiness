@@ -26,6 +26,9 @@ export async function fetchStakeAccounts(
   const endpoints = [primaryEndpoint, ...fallbacks].filter(Boolean) as string[];
 
   let lastError: any;
+  let sawSuccessfulQuery = false;
+  const merged = new Map<string, StakeAccountInfo>();
+
   for (const endpoint of endpoints.length ? endpoints : [RPC_URLS['mainnet-beta']]) {
     try {
       const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
@@ -38,18 +41,24 @@ export async function fetchStakeAccounts(
         }),
       ]);
 
-      const byPubkey = new Map<string, StakeAccountInfo>();
+      sawSuccessfulQuery = true;
       for (const a of [...asStaker, ...asWithdrawer]) {
-        byPubkey.set(a.pubkey.toBase58(), {
+        merged.set(a.pubkey.toBase58(), {
           pubkey: a.pubkey.toBase58(),
           lamports: a.account.lamports,
         });
       }
-
-      return [...byPubkey.values()];
     } catch (e: any) {
       lastError = e;
     }
+  }
+
+  if (merged.size > 0) {
+    return [...merged.values()];
+  }
+
+  if (sawSuccessfulQuery) {
+    return [];
   }
 
   throw lastError ?? new Error('Failed to fetch stake accounts from all RPC endpoints');
