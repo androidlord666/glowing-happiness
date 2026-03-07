@@ -1591,9 +1591,13 @@ export default function App() {
               onChangeText={setSendSol}
               keyboardType="decimal-pad"
             />
-            <View style={styles.row}>
-              <ActionButton label="Max" onPress={onSendMax} disabled={busy} />
-              <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
+            <View style={styles.equalBtnRow}>
+              <View style={styles.equalBtnCell}>
+                <ActionButton label="Max" onPress={onSendMax} disabled={busy} />
+              </View>
+              <View style={styles.equalBtnCell}>
+                <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
+              </View>
             </View>
           </Animated.View>
         )}
@@ -1915,6 +1919,8 @@ const styles = StyleSheet.create({
     borderColor: '#8ADFD3',
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
+  equalBtnRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
+  equalBtnCell: { flex: 1 },
   modeTabsRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },
   modeTabBtn: {
     flex: 1,
