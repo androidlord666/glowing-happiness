@@ -285,6 +285,8 @@ export default function App() {
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
+  const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
+  const canWithdraw = !busy && !!destination && destinationState === 'undelegated';
   const consolidationFeeSkr = Math.min(
     selectedCount * PLATFORM_FEE_PER_SOURCE_SKR,
     PLATFORM_FEE_CAP_SKR
@@ -931,8 +933,13 @@ export default function App() {
             <View style={styles.row}>
               <ActionButton label={busy ? 'Staking…' : 'Create + Stake'} onPress={onCreateStake} />
               <ActionButton label={busy ? 'Unstaking…' : 'Unstake'} onPress={onUnstake} />
-              <ActionButton label={busy ? 'Withdrawing…' : 'Withdraw'} onPress={onWithdraw} />
+              <ActionButton
+                label={busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (undelegated only)'}
+                onPress={onWithdraw}
+                disabled={!canWithdraw}
+              />
             </View>
+            <Text style={styles.meta}>Withdraw status: {destination ? destinationState : 'select destination'}</Text>
 
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
