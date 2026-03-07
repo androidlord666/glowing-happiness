@@ -49,7 +49,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.28 (code 39)';
+const APP_VERSION_LABEL = 'v2.29 (code 40)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -502,7 +502,7 @@ export default function App() {
         if (done.size) {
           setPendingTxs((prev) => prev.filter((p) => !done.has(p.sig)));
           await refreshWalletBalances();
-          setStatus('Transaction confirmed. Tap Refresh to sync stake-account state.');
+          setStatus('Transaction confirmed. Swipe down from top to sync stake-account state.');
         }
       } catch {
         // no-op
@@ -663,7 +663,7 @@ export default function App() {
       }
       setDestination(stakeAddress);
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Staked ${createStakeSol} SOL. Tap Refresh to sync new stake account state.`);
+      setStatus(`✅ Staked ${createStakeSol} SOL. Swipe down from top to sync new stake account state.`);
     } catch (e: any) {
       setStatus(actionError('Create+stake error', e));
     } finally {
@@ -703,7 +703,7 @@ export default function App() {
           // keep default hint
         }
         await refreshWalletBalances(wallet);
-        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint} Tap Refresh to update list.`);
+        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint} Swipe down from top to update list.`);
       }
     } catch (e: any) {
       setStatus(actionError('Unstake error', e));
@@ -748,7 +748,7 @@ export default function App() {
         setStatus(`💸 Withdraw submitted for ${shortAddr(destination)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         await refreshWalletBalances(wallet);
-        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}. Tap Refresh to sync stake list.`);
+        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}. Swipe down from top to sync stake list.`);
       }
     } catch (e: any) {
       setStatus(actionError('Withdraw error', e));
@@ -872,7 +872,7 @@ export default function App() {
 
       setSelected({});
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx, fee ${consolidationFeeSkrText} SKR). Tap Refresh to sync stake state.`);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx, fee ${consolidationFeeSkrText} SKR). Swipe down from top to sync stake state.`);
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
@@ -1312,13 +1312,13 @@ export default function App() {
             />
 
             <View style={styles.row}>
-              <ActionButton label={busy ? 'Refreshing…' : 'Refresh'} onPress={() => loadStakeAccounts()} />
               <ActionButton
                 label={busy ? 'Consolidating…' : 'Consolidate'}
                 onPress={() => setConfirmConsolidate(true)}
                 disabled={!canConsolidate}
               />
             </View>
+            <Text style={styles.meta}>Swipe down from top near Mainnet to refresh.</Text>
 
             <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, undelegated below)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
