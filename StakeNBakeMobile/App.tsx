@@ -402,7 +402,11 @@ export default function App() {
     () => stakeAccounts.filter((a) => isWithdrawReadyState(a.stakeState)),
     [stakeAccounts]
   );
-  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!destination && isWithdrawReadyState(destinationState);
+  const withdrawTarget = useMemo(
+    () => (destination && isWithdrawReadyState(destinationState) ? destination : withdrawReadyAccounts[0]?.pubkey ?? ''),
+    [destination, destinationState, withdrawReadyAccounts]
+  );
+  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!withdrawTarget;
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
@@ -737,12 +741,14 @@ export default function App() {
     if (busy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
-      if (!destination) throw new Error('Select a stake account first');
+      if (!withdrawTarget) throw new Error('No withdraw-ready stake account detected yet. Refresh and try again.');
+      const target = withdrawTarget;
+      if (target !== destination) setDestination(target);
 
       setBusy(true);
       setStatus('Checking stake account withdraw eligibility...');
 
-      const stakePubkey = asPublicKey(destination);
+      const stakePubkey = asPublicKey(target);
       const accountInfo = await connection.getAccountInfo(stakePubkey, 'confirmed');
 
       if (!accountInfo) throw new Error('Stake account not found. Refresh and try again.');
@@ -757,7 +763,7 @@ export default function App() {
       const tx = await buildWithdrawStakeTx({
         connection,
         owner: asPublicKey(wallet),
-        stakeAccount: asPublicKey(destination),
+        stakeAccount: asPublicKey(target),
         to: asPublicKey(wallet),
         lamports,
       });
@@ -766,7 +772,7 @@ export default function App() {
       if (sigs[0]) {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Withdraw transaction');
-        setStatus(`💸 Withdraw submitted for ${shortAddr(destination)}. Confirming...`);
+        setStatus(`💸 Withdraw submitted for ${shortAddr(target)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         await refreshWalletBalances(wallet);
         setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}. Swipe down from top to sync stake list.`);
