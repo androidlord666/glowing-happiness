@@ -22,7 +22,7 @@ import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
   createAssociatedTokenAccountInstruction,
-  createTransferCheckedInstruction,
+  createTransferInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
 import { ActionButton } from './src/components/ActionButton';
@@ -930,25 +930,7 @@ export default function App() {
         throw new Error('No merge transactions were created.');
       }
 
-      setStatus('Preflighting merge transactions...');
-      const preflight = await Promise.all(
-        mergeTxCandidates.map(async (tx) => {
-          try {
-            const sim = await connection.simulateTransaction(tx as any, {
-              sigVerify: false,
-              replaceRecentBlockhash: true,
-              commitment: 'confirmed',
-            } as any);
-            return { ok: !sim.value.err, err: sim.value.err };
-          } catch (e: any) {
-            return { ok: false, err: e?.message ?? 'simulation failed' };
-          }
-        })
-      );
-
-      const preflightValid = mergeTxCandidates.filter((_, i) => preflight[i].ok);
-      const mergeTxsToSend = preflightValid.length ? preflightValid : mergeTxCandidates;
-      const skippedByPreflight = preflight.length - preflightValid.length;
+      const mergeTxsToSend = mergeTxCandidates;
 
       const chargedFeeSkr = FEATURE_FEE_ENABLED
         ? Math.min(mergeTxsToSend.length * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
@@ -961,26 +943,8 @@ export default function App() {
         const feeWallet = asPublicKey(PLATFORM_FEE_WALLET);
         const ownerAta = getAssociatedTokenAddressSync(mint, owner);
         const feeAta = getAssociatedTokenAddressSync(mint, feeWallet);
-
-        const [mintInfo, ownerTokenBal] = await Promise.all([
-          connection.getParsedAccountInfo(mint, 'confirmed'),
-          connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null),
-        ]);
-
-        const decimals = Number((mintInfo.value?.data as any)?.parsed?.info?.decimals ?? NaN);
-        if (!Number.isFinite(decimals)) {
-          throw new Error('Could not read SKR mint decimals.');
-        }
-
-        if (!ownerTokenBal?.value?.amount) {
-          throw new Error('No SKR token account found in connected wallet.');
-        }
-
+        const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
         const rawAmount = BigInt(Math.round(chargedFeeSkr * Math.pow(10, decimals)));
-        const ownerRaw = BigInt(ownerTokenBal.value.amount);
-        if (ownerRaw < rawAmount) {
-          throw new Error(`Insufficient SKR for fee. Need ${chargedFeeSkr.toFixed(2)} SKR.`);
-        }
 
         const recent = await connection.getLatestBlockhash('confirmed');
         const feeTx = new Transaction({
@@ -994,25 +958,7 @@ export default function App() {
           feeTx.add(createAssociatedTokenAccountInstruction(owner, feeAta, feeWallet, mint));
         }
 
-        feeTx.add(
-          createTransferCheckedInstruction(
-            ownerAta,
-            mint,
-            feeAta,
-            owner,
-            Number(rawAmount),
-            decimals
-          )
-        );
-
-        const feeSim = await connection.simulateTransaction(feeTx as any, {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          commitment: 'confirmed',
-        } as any);
-        if (feeSim.value.err) {
-          throw new Error(`Fee transaction simulation failed: ${JSON.stringify(feeSim.value.err)}`);
-        }
+        feeTx.add(createTransferInstruction(ownerAta, feeAta, owner, rawAmount));
 
         setStatus('Submitting required platform fee transaction...');
         const feeSigs = await walletAdapter.signAndSendTransactions([feeTx]);
@@ -1111,14 +1057,13 @@ export default function App() {
       setSelected({});
       await refreshWalletBalances(wallet);
       const notes: string[] = [];
-      if (preflightValid.length && skippedByPreflight) notes.push(`skipped ${skippedByPreflight} preflight-flagged`);
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
       setStatus(`✅ Consolidation submitted (${submittedMergeSigs.length} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
-      setStatus(`Consolidation: ${normalizeErrorMessage(e)}`);
+      setStatus('Consolidation not submitted. Please try again.');
     } finally {
       setBusy(false);
     }
