@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.35 (code 46)';
+const APP_VERSION_LABEL = 'v2.36 (code 47)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -1450,14 +1450,22 @@ export default function App() {
           <Animated.View style={[styles.card, theme === 'light' && styles.cardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Swap (Jupiter)</Text>
             <Text style={styles.meta}>Pair: SOL ↔ SKR</Text>
-            <View style={styles.row}>
-              <ActionButton
-                label={swapDir === 'SOL_TO_SKR' ? 'SOL → SKR' : 'SKR → SOL'}
+            <View style={styles.swapTopRow}>
+              <Pressable
                 onPress={() => setSwapDir((d) => (d === 'SOL_TO_SKR' ? 'SKR_TO_SOL' : 'SOL_TO_SKR'))}
-              />
-              <ActionButton label="-" onPress={() => setSwapSlippageBps((s) => Math.max(10, s - 10))} />
-              <ActionButton label={`Slip ${(swapSlippageBps / 100).toFixed(2)}%`} onPress={() => {}} />
-              <ActionButton label="+" onPress={() => setSwapSlippageBps((s) => Math.min(300, s + 10))} />
+                style={styles.swapTopBtn}
+              >
+                <Text style={styles.swapTopBtnText}>{swapDir === 'SOL_TO_SKR' ? 'SOL → SKR' : 'SKR → SOL'}</Text>
+              </Pressable>
+              <Pressable onPress={() => setSwapSlippageBps((s) => Math.max(10, s - 10))} style={styles.swapTinyBtn}>
+                <Text style={styles.swapTopBtnText}>-</Text>
+              </Pressable>
+              <Pressable onPress={() => {}} style={styles.swapSlipBtn}>
+                <Text style={styles.swapTopBtnText}>Slip {(swapSlippageBps / 100).toFixed(2)}%</Text>
+              </Pressable>
+              <Pressable onPress={() => setSwapSlippageBps((s) => Math.min(300, s + 10))} style={styles.swapTinyBtn}>
+                <Text style={styles.swapTopBtnText}>+</Text>
+              </Pressable>
             </View>
             <TextInput
               style={[styles.input, theme === 'light' && styles.inputLight]}
@@ -1467,9 +1475,13 @@ export default function App() {
               onChangeText={setSwapAmount}
               keyboardType="decimal-pad"
             />
-            <View style={styles.row}>
-              <ActionButton label={swapBusy ? 'Quoting…' : 'Get Quote'} onPress={fetchSwapQuote} />
-              <ActionButton label={swapBusy ? 'Swapping…' : 'Swap Now'} onPress={executeSwapInApp} />
+            <View style={styles.swapActionRow}>
+              <Pressable style={styles.swapActionBtn} onPress={fetchSwapQuote}>
+                <Text style={styles.swapActionBtnText}>{swapBusy ? 'Quoting…' : 'Get Quote'}</Text>
+              </Pressable>
+              <Pressable style={styles.swapActionBtn} onPress={executeSwapInApp}>
+                <Text style={styles.swapActionBtnText}>{swapBusy ? 'Swapping…' : 'Swap Now'}</Text>
+              </Pressable>
             </View>
             {!!swapQuoteText && <Text style={styles.swapQuote}>{swapQuoteText}</Text>}
             {!!swapMinReceivedText && <Text style={styles.meta}>Min received: {swapMinReceivedText}</Text>}
@@ -1477,7 +1489,7 @@ export default function App() {
             <Text style={styles.meta}>Price impact: {(swapImpactPct * 100).toFixed(3)}%</Text>
             {swapImpactPct > 0.02 && <Text style={styles.warnText}>⚠ High price impact — consider reducing amount.</Text>}
             {swapStale && <Text style={styles.warnText}>⚠ Quote stale — auto-refreshing.</Text>}
-            <Text style={styles.meta}>SKR decimals: {skrDecimals} · Swap executes in-app via Jupiter transaction.</Text>
+            <Text style={styles.meta}>Swap executes in-app via Jupiter transaction.</Text>
           </Animated.View>
         )}
 
@@ -1796,6 +1808,51 @@ const styles = StyleSheet.create({
   status: { color: colors.secondary, marginTop: 10 },
   statusMuted: { color: colors.secondary, marginTop: 10, opacity: 0.7 },
   link: { color: colors.primary, textDecorationLine: 'underline', marginTop: 6 },
+  swapTopRow: { flexDirection: 'row', alignItems: 'center', gap: 6, marginBottom: 6 },
+  swapTopBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#101824',
+    borderRadius: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapSlipBtn: {
+    minWidth: 92,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#101824',
+    borderRadius: 10,
+    paddingVertical: 8,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapTinyBtn: {
+    width: 34,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#101824',
+    borderRadius: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapTopBtnText: { color: '#D6EFEA', fontWeight: '700', fontSize: 13 },
+  swapActionRow: { flexDirection: 'row', gap: 8, marginBottom: 2 },
+  swapActionBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#101824',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  swapActionBtnText: { color: '#D6EFEA', fontWeight: '800', fontSize: 14 },
   swapQuote: { color: '#14F195', fontWeight: '700', marginTop: 4 },
   warnText: { color: '#FFB86B', fontWeight: '700', marginTop: 4 },
   confirmOverlay: {
