@@ -1566,17 +1566,26 @@ export default function App() {
             <View style={styles.swapTopRow}>
               <Pressable
                 onPress={() => setSwapDir((d) => (d === 'SOL_TO_SKR' ? 'SKR_TO_SOL' : 'SOL_TO_SKR'))}
-                style={styles.swapTopBtn}
+                style={({ pressed }) => [styles.swapTopBtn, pressed && styles.swapTopBtnPressed]}
               >
                 <Text style={styles.swapTopBtnText}>{swapDir === 'SOL_TO_SKR' ? 'SOL → SKR' : 'SKR → SOL'}</Text>
               </Pressable>
-              <Pressable onPress={() => setSwapSlippageBps((s) => Math.max(10, s - 10))} style={styles.swapTinyBtn}>
+              <Pressable
+                onPress={() => setSwapSlippageBps((s) => Math.max(10, s - 10))}
+                style={({ pressed }) => [styles.swapTinyBtn, pressed && styles.swapTopBtnPressed]}
+              >
                 <Text style={styles.swapTopBtnText}>-</Text>
               </Pressable>
-              <Pressable onPress={() => {}} style={styles.swapSlipBtn}>
+              <Pressable
+                onPress={() => {}}
+                style={({ pressed }) => [styles.swapSlipBtn, pressed && styles.swapTopBtnPressed]}
+              >
                 <Text style={styles.swapTopBtnText}>Slip {(swapSlippageBps / 100).toFixed(2)}%</Text>
               </Pressable>
-              <Pressable onPress={() => setSwapSlippageBps((s) => Math.min(300, s + 10))} style={styles.swapTinyBtn}>
+              <Pressable
+                onPress={() => setSwapSlippageBps((s) => Math.min(300, s + 10))}
+                style={({ pressed }) => [styles.swapTinyBtn, pressed && styles.swapTopBtnPressed]}
+              >
                 <Text style={styles.swapTopBtnText}>+</Text>
               </Pressable>
             </View>
@@ -1948,18 +1957,24 @@ const styles = StyleSheet.create({
   swapTopBtn: {
     flex: 1,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#101824',
+    borderColor: '#00D7C8',
+    backgroundColor: '#14F195',
     borderRadius: 10,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  swapTopBtnPressed: {
+    transform: [{ scale: 0.98 }],
+    opacity: 0.9,
+    borderColor: '#00B8AB',
+    backgroundColor: '#0AD7B8',
+  },
   swapSlipBtn: {
     minWidth: 92,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#101824',
+    borderColor: '#00D7C8',
+    backgroundColor: '#14F195',
     borderRadius: 10,
     paddingVertical: 8,
     paddingHorizontal: 10,
@@ -1969,14 +1984,14 @@ const styles = StyleSheet.create({
   swapTinyBtn: {
     width: 34,
     borderWidth: 1,
-    borderColor: colors.border,
-    backgroundColor: '#101824',
+    borderColor: '#00D7C8',
+    backgroundColor: '#14F195',
     borderRadius: 10,
     paddingVertical: 8,
     alignItems: 'center',
     justifyContent: 'center',
   },
-  swapTopBtnText: { color: '#D6EFEA', fontWeight: '700', fontSize: 13 },
+  swapTopBtnText: { color: '#072225', fontWeight: '700', fontSize: 13 },
   swapActionRow: { flexDirection: 'row', gap: 8, marginBottom: 2 },
   swapActionBtn: {
     flex: 1,
