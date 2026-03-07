@@ -133,6 +133,7 @@ export default function App() {
   const [rpcHealth, setRpcHealth] = useState<RpcHealth>('healthy');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [confirmConsolidate, setConfirmConsolidate] = useState(false);
+  const [showFeePolicy, setShowFeePolicy] = useState(false);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
@@ -217,6 +218,12 @@ export default function App() {
     if (!selected[destination]) return;
     setSelected((prev) => ({ ...prev, [destination]: false }));
   }, [destination, selected]);
+
+  useEffect(() => {
+    if (!status) return;
+    const t = setTimeout(() => setStatus(''), 6000);
+    return () => clearTimeout(t);
+  }, [status]);
 
   const sourceStakeAccounts = useMemo(
     () => stakeAccounts.filter((a) => a.pubkey !== destination),
@@ -963,6 +970,7 @@ export default function App() {
             </View>
           )}
 
+          <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
           <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
 
         </View>
@@ -976,6 +984,8 @@ export default function App() {
             <Text style={styles.meta}>Sources: {selectedCount}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only)</Text>
             <Text style={styles.meta}>Fee wallet: {shortAddr(PLATFORM_FEE_WALLET)}</Text>
+            <Text style={styles.meta}>Breakdown: merge txs {selectedCount + 1} + fee tx 1</Text>
+            <Text style={styles.meta}>No hidden fees.</Text>
             <View style={styles.row}>
               <ActionButton label="Cancel" onPress={() => setConfirmConsolidate(false)} />
               <ActionButton
@@ -987,6 +997,21 @@ export default function App() {
                 disabled={busy}
               />
             </View>
+          </View>
+        </View>
+      )}
+
+      {showFeePolicy && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.label}>Fee Policy</Text>
+            <Text style={styles.meta}>Token: SKR only</Text>
+            <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
+            <Text style={styles.meta}>Formula: 10 SKR × source accounts</Text>
+            <Text style={styles.meta}>Cap: 100 SKR per consolidation</Text>
+            <Text style={styles.meta}>Collector wallet: {PLATFORM_FEE_WALLET}</Text>
+            <Text style={styles.meta}>No hidden fees.</Text>
+            <ActionButton label="Close" onPress={() => setShowFeePolicy(false)} />
           </View>
         </View>
       )}
