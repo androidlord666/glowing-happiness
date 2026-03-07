@@ -162,21 +162,50 @@ type StakeParsedMeta = {
   delegationState?: string;
 };
 
-async function getStakeParsedMeta(connection: any, account: string): Promise<StakeParsedMeta> {
+const U64_MAX_EPOCH = BigInt('18446744073709551615');
+
+function parseEpoch(value: unknown): bigint | null {
+  if (value === null || value === undefined) return null;
+  try {
+    return BigInt(String(value));
+  } catch {
+    return null;
+  }
+}
+
+function deriveDelegationState(parsed: any, currentEpoch?: bigint): string | undefined {
+  const baseType = String(parsed?.type ?? '').toLowerCase();
+  if (!baseType) return undefined;
+  if (baseType === 'initialized' || baseType === 'uninitialized') return 'undelegated';
+  if (baseType !== 'delegated' && baseType !== 'stake') return baseType;
+
+  if (currentEpoch === undefined) return 'delegated';
+
+  const delegation = parsed?.info?.stake?.delegation;
+  const activationEpoch = parseEpoch(delegation?.activationEpoch);
+  const deactivationEpoch = parseEpoch(delegation?.deactivationEpoch);
+  if (activationEpoch === null || deactivationEpoch === null) return 'delegated';
+
+  if (deactivationEpoch !== U64_MAX_EPOCH) {
+    if (currentEpoch >= deactivationEpoch) return 'inactive';
+    return 'deactivating';
+  }
+  if (currentEpoch < activationEpoch) return 'activating';
+  return 'active';
+}
+
+async function getStakeParsedMeta(connection: any, account: string, currentEpoch?: bigint): Promise<StakeParsedMeta> {
   const pubkey = asPublicKey(account);
-  const info = await connection.getParsedAccountInfo(pubkey, 'confirmed');
+  const info: any = await withRetries<any>(
+    () => connection.getParsedAccountInfo(pubkey, 'confirmed'),
+    1,
+    250
+  );
   const parsed = (info.value?.data as any)?.parsed;
   const stake = parsed?.info?.stake;
 
-  let delegationState = parsed?.type as string | undefined;
-  if (delegationState === 'delegated') {
-    try {
-      const activation = await connection.getStakeActivation(pubkey, 'confirmed');
-      if (activation?.state) delegationState = activation.state;
-    } catch {
-      // keep delegated fallback when activation lookup is unavailable
-    }
-  }
+  let delegationState = deriveDelegationState(parsed, currentEpoch);
+  if (!delegationState && parsed?.type) delegationState = String(parsed.type);
 
   return {
     delegationVote: stake?.delegation?.voter,
@@ -606,10 +635,13 @@ export default function App() {
       setRpcHealth('healthy');
       setStakeAccounts(seeded);
 
+      const epochInfo = await connection.getEpochInfo('confirmed').catch(() => null);
+      const currentEpoch = epochInfo?.epoch !== undefined ? BigInt(epochInfo.epoch) : undefined;
+
       const resolved = await Promise.all(
         seeded.map(async (a) => {
           try {
-            const meta = await getStakeParsedMeta(connection, a.pubkey);
+            const meta = await getStakeParsedMeta(connection, a.pubkey, currentEpoch);
             return { ...a, stakeState: meta.delegationState ?? 'unknown' };
           } catch {
             return { ...a, stakeState: 'unknown' };
@@ -1448,7 +1480,7 @@ export default function App() {
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
             {!!destinationOrderedAccounts.length && (
-              <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Undelegated: {undelegatedAccounts.length} · Delegated/activating: {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
+            <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Undelegated/inactive: {undelegatedAccounts.length} · Delegated(active/transition): {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
             )}
             {!!withdrawReadyAccounts.length && (
               <Text style={styles.link} onPress={() => setDestination(withdrawReadyAccounts[0].pubkey)}>
@@ -1469,7 +1501,7 @@ export default function App() {
                     style={[styles.account, isDest && styles.accountDestination, theme === 'light' && styles.accountLight]}
                     onPress={() => setDestination(a.pubkey)}
                   >
-                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {presentStakeState(a.stakeState)}
+                    {isDest ? '◉' : '◯'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {presentStakeState(a.stakeState)}
                   </Text>
                 );
               }}
@@ -1516,7 +1548,7 @@ export default function App() {
                       setSelected(next);
                     }}
                   >
-                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {a.lamports} lamports · {presentStakeState(a.stakeState)}
+                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · {presentStakeState(a.stakeState)}
                   </Text>
                 );
               }}
