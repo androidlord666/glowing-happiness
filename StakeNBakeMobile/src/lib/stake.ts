@@ -27,7 +27,7 @@ export function solToLamports(sol: string): number {
 
 export function assertConsolidationLimits(sourceCount: number): void {
   if (sourceCount < 1) throw new Error('Select at least one source stake account');
-  if (sourceCount > 25) throw new Error('Maximum 25 source accounts per consolidation');
+  if (sourceCount > 99) throw new Error('Maximum 99 source accounts per consolidation');
 }
 
 export async function buildConsolidationTransactions(params: {

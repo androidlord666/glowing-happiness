@@ -75,9 +75,9 @@ describe('stake consolidation tx builder', () => {
 
   test('enforces source account limits', () => {
     expect(() => assertConsolidationLimits(0)).toThrow('Select at least one source stake account');
-    expect(() => assertConsolidationLimits(26)).toThrow('Maximum 25 source accounts per consolidation');
+    expect(() => assertConsolidationLimits(100)).toThrow('Maximum 99 source accounts per consolidation');
     expect(() => assertConsolidationLimits(1)).not.toThrow();
-    expect(() => assertConsolidationLimits(25)).not.toThrow();
+    expect(() => assertConsolidationLimits(99)).not.toThrow();
   });
 
   test('includes delegate tx by default', async () => {

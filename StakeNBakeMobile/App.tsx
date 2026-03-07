@@ -51,7 +51,7 @@ type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
 const APP_VERSION_LABEL = 'v2.39 (code 50)';
-const MAX_SOURCE_ACCOUNTS = 25;
+const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
 const FEATURE_FEE_ENABLED = true;
