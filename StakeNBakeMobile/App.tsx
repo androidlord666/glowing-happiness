@@ -57,18 +57,30 @@ function shortAddr(v: string) {
   return `${v.slice(0, 6)}...${v.slice(-6)}`;
 }
 
+function classifyError(e: any): 'user' | 'rpc' | 'wallet' | 'chain' | 'unknown' {
+  const raw = String(e?.message ?? e ?? '').toLowerCase();
+  if (raw.includes('cancel') || raw.includes('declin') || raw.includes('rejected') || raw.includes('user denied') || raw.includes('user aborted')) {
+    return 'user';
+  }
+  if (raw.includes('429') || raw.includes('too many requests') || raw.includes('timeout') || raw.includes('network')) {
+    return 'rpc';
+  }
+  if (raw.includes('wallet') || raw.includes('auth') || raw.includes('sign')) {
+    return 'wallet';
+  }
+  if (raw.includes('insufficient') || raw.includes('invalid') || raw.includes('inactive') || raw.includes('stake account')) {
+    return 'chain';
+  }
+  return 'unknown';
+}
+
 function normalizeErrorMessage(e: any): string {
   const raw = String(e?.message ?? e ?? 'unknown error');
-  const lower = raw.toLowerCase();
-  if (
-    lower.includes('cancel') ||
-    lower.includes('declin') ||
-    lower.includes('rejected') ||
-    lower.includes('user denied') ||
-    lower.includes('user aborted')
-  ) {
-    return 'Transaction cancelled by user.';
-  }
+  const kind = classifyError(e);
+  if (kind === 'user') return 'Transaction cancelled by user.';
+  if (kind === 'rpc') return `RPC issue: ${raw}`;
+  if (kind === 'wallet') return `Wallet issue: ${raw}`;
+  if (kind === 'chain') return `Chain/state issue: ${raw}`;
   return raw;
 }
 
@@ -373,38 +385,46 @@ export default function App() {
         500
       );
 
-      const withState = await Promise.all(
-        items.map(async (a) => {
-          try {
-            const meta = await getStakeParsedMeta(connection, a.pubkey);
-            return { ...a, stakeState: meta.delegationState };
-          } catch {
-            return a;
-          }
-        })
-      );
+      // Fast path: render accounts first, then lazily hydrate stake state metadata.
+      const seeded = items.map((a) => ({ ...a, stakeState: a.stakeState ?? 'loading' }));
+      setRpcHealth('healthy');
+      lastStakeAccountsRef.current = seeded;
+      setStakeAccounts(seeded);
 
       const elapsed = Date.now() - startedAt;
       refreshMetricsRef.current.count += 1;
       refreshMetricsRef.current.totalMs += elapsed;
 
-      setRpcHealth('healthy');
-      lastStakeAccountsRef.current = withState;
-      setStakeAccounts(withState);
+      const lazyTargets = seeded.slice(0, 30);
+      Promise.all(
+        lazyTargets.map(async (a) => {
+          try {
+            const meta = await getStakeParsedMeta(connection, a.pubkey);
+            return { pubkey: a.pubkey, stakeState: meta.delegationState ?? 'unknown' };
+          } catch {
+            return { pubkey: a.pubkey, stakeState: 'unknown' };
+          }
+        })
+      ).then((updates) => {
+        setStakeAccounts((prev) => prev.map((acc) => {
+          const next = updates.find((u) => u.pubkey === acc.pubkey);
+          return next ? { ...acc, stakeState: next.stakeState } : acc;
+        }));
+      });
       setSelected((prev) => {
-        const valid = new Set(withState.map((i) => i.pubkey));
+        const valid = new Set(seeded.map((i) => i.pubkey));
         const next: Record<string, boolean> = {};
         for (const [k, v] of Object.entries(prev)) {
           if (v && valid.has(k)) next[k] = true;
         }
         return next;
       });
-      if (!withState.length) {
+      if (!seeded.length) {
         setDestination('');
-      } else if (!destination || !withState.some((i) => i.pubkey === destination)) {
-        setDestination(withState[0].pubkey);
+      } else if (!destination || !seeded.some((i) => i.pubkey === destination)) {
+        setDestination(seeded[0].pubkey);
       }
-      setStatus(withState.length ? `Loaded ${withState.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
+      setStatus(seeded.length ? `Loaded ${seeded.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
@@ -639,6 +659,18 @@ export default function App() {
         );
 
         txBatch = [...txBatch, feeTx];
+      }
+
+      if (consolidationFeeSkr > 0) {
+        const feeTx = txBatch[txBatch.length - 1];
+        const sim = await connection.simulateTransaction(feeTx, {
+          sigVerify: false,
+          replaceRecentBlockhash: true,
+          commitment: 'confirmed',
+        });
+        if (sim.value.err) {
+          throw new Error(`Fee transaction simulation failed: ${JSON.stringify(sim.value.err)}`);
+        }
       }
 
       setStatus(`Submitting consolidation transactions (${txBatch.length})...`);
