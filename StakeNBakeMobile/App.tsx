@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
-const APP_VERSION_LABEL = 'v2.9 (code 20)';
+const APP_VERSION_LABEL = 'v2.10 (code 21)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -167,6 +167,7 @@ export default function App() {
   const [confirmConsolidate, setConfirmConsolidate] = useState(false);
   const [showFeePolicy, setShowFeePolicy] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
+  const [showTips, setShowTips] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
@@ -298,6 +299,7 @@ export default function App() {
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
   const consolidationFeeSkrText = consolidationFeeSkr.toFixed(2);
+  const pendingTxSet = useMemo(() => new Set(pendingTxs.map((p) => p.sig)), [pendingTxs]);
 
   const rememberTx = (sig: string) => {
     setLastSignature(sig);
@@ -414,6 +416,7 @@ export default function App() {
       setWallet(session.address);
       setScreen('app');
       setShowWhatsNew(true);
+      setShowTips(true);
       setStatus('Wallet connected.');
       await loadStakeAccounts(session.address);
       await refreshWalletBalances(session.address);
@@ -889,6 +892,26 @@ export default function App() {
     setStatus('Support bundle copied.');
   };
 
+  const copyFeeWallet = () => {
+    Clipboard.setString(PLATFORM_FEE_WALLET);
+    setStatus('Fee wallet copied.');
+  };
+
+  const copyIssueTemplate = () => {
+    const template = [
+      `Issue Report (${APP_VERSION_LABEL})`,
+      `- What happened:`,
+      `- Expected:`,
+      `- Wallet: ${shortAddr(wallet)}`,
+      `- Last tx: ${lastSignature || 'n/a'}`,
+      `- Time: ${new Date().toISOString()}`,
+      '',
+      'Support bundle (paste below):',
+    ].join('\n');
+    Clipboard.setString(template);
+    setStatus('Issue template copied. Paste support bundle below it.');
+  };
+
   if (screen === 'splash') {
     const whitePhase = splashPhase === 0;
     return (
@@ -1116,11 +1139,14 @@ export default function App() {
         {txHistory.length > 0 && (
           <View>
             <Text style={styles.meta}>Recent transactions</Text>
-            {txHistory.map((sig, idx) => (
-              <Text key={sig} style={styles.link} onPress={() => Linking.openURL(txUrl(sig, cluster, explorer))}>
-                {idx + 1}. {shortAddr(sig)}
-              </Text>
-            ))}
+            {txHistory.map((sig, idx) => {
+              const txState = pendingTxSet.has(sig) ? 'submitted' : 'confirmed';
+              return (
+                <Text key={sig} style={styles.link} onPress={() => Linking.openURL(txUrl(sig, cluster, explorer))}>
+                  {idx + 1}. {shortAddr(sig)} [{txState}]
+                </Text>
+              );
+            })}
           </View>
         )}
       </ScrollView>
@@ -1146,9 +1172,12 @@ export default function App() {
           )}
 
           <ActionButton label="What's New" onPress={() => setShowWhatsNew(true)} />
+          <ActionButton label="Quick Tips" onPress={() => setShowTips(true)} />
           <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
+          <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
           <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
           <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
+          <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
 
         </View>
       )}
@@ -1203,6 +1232,18 @@ export default function App() {
             <Text style={styles.meta}>• Wallet box now shows SOL and SKR balances</Text>
             <Text style={styles.meta}>• Lifecycle/app-switch stability hardening</Text>
             <ActionButton label="Close" onPress={() => setShowWhatsNew(false)} />
+          </View>
+        </View>
+      )}
+
+      {showTips && (
+        <View style={styles.confirmOverlay}>
+          <View style={styles.confirmCard}>
+            <Text style={styles.label}>Quick Tips</Text>
+            <Text style={styles.meta}>• Unstake (deactivate) first, then withdraw when undelegated.</Text>
+            <Text style={styles.meta}>• Consolidation fee is always shown before you sign.</Text>
+            <Text style={styles.meta}>• Use Refresh after confirmations to sync balances and state.</Text>
+            <ActionButton label="Got it" onPress={() => setShowTips(false)} />
           </View>
         </View>
       )}
