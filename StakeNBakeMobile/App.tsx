@@ -46,9 +46,9 @@ type Mode = 'stake' | 'send' | 'receive';
 type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
-type SourceFilter = 'all' | 'mergeable' | 'high';
+type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.16 (code 27)';
+const APP_VERSION_LABEL = 'v2.17 (code 28)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -295,12 +295,11 @@ export default function App() {
   }, [stakeAccounts, destination]);
 
   const filteredSourceStakeAccounts = useMemo(() => {
-    let items = [...sourceStakeAccounts];
-    if (sourceFilter === 'mergeable') {
-      items = items.filter((a) => a.lamports > 0);
-    }
+    const items = [...sourceStakeAccounts];
     if (sourceFilter === 'high') {
       items.sort((a, b) => b.lamports - a.lamports);
+    } else if (sourceFilter === 'low') {
+      items.sort((a, b) => a.lamports - b.lamports);
     }
     return items;
   }, [sourceStakeAccounts, sourceFilter]);
@@ -359,12 +358,26 @@ export default function App() {
     }
   };
 
+  const allFilteredSelected = useMemo(() => {
+    if (!filteredSourceStakeAccounts.length) return false;
+    const subset = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
+    return subset.every((a) => !!selected[a.pubkey]);
+  }, [filteredSourceStakeAccounts, selected]);
+
   const selectAllValidSources = () => {
-    const valid = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
-    const next: Record<string, boolean> = {};
-    for (const a of valid) next[a.pubkey] = true;
+    const subset = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
+    if (allFilteredSelected) {
+      const next = { ...selected };
+      for (const a of subset) delete next[a.pubkey];
+      setSelected(next);
+      setStatus(`Deselected ${subset.length} source account(s).`);
+      return;
+    }
+
+    const next = { ...selected };
+    for (const a of subset) next[a.pubkey] = true;
     setSelected(next);
-    setStatus(`Selected ${valid.length} source account(s).`);
+    setStatus(`Selected ${subset.length} source account(s).`);
   };
 
   useEffect(() => {
@@ -1050,8 +1063,8 @@ export default function App() {
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only · supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
-              <ActionButton label={`Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'all' ? 'mergeable' : f === 'mergeable' ? 'high' : 'all')} />
-              <ActionButton label="Select all valid" onPress={selectAllValidSources} disabled={busy || filteredSourceStakeAccounts.length === 0} />
+              <ActionButton label={`Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'high' ? 'low' : f === 'low' ? 'all' : 'high')} />
+              <ActionButton label={allFilteredSelected ? 'Deselect all' : 'Select all'} onPress={selectAllValidSources} disabled={busy || filteredSourceStakeAccounts.length === 0} />
             </View>
             {filteredSourceStakeAccounts.length === 0 && (
               <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>

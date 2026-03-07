@@ -91,8 +91,8 @@ android {
         applicationId "com.stakenbakemobile"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
-        versionCode 27
-        versionName "2.16"
+        versionCode 28
+        versionName "2.17"
     }
     signingConfigs {
         debug {
