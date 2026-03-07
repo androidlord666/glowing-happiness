@@ -264,6 +264,7 @@ export default function App() {
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [showTips, setShowTips] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const suppressNextStatusModalRef = useRef(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
   const [consolidationSendMode, setConsolidationSendMode] = useState<ConsolidationSendMode>('sequential');
@@ -392,6 +393,10 @@ export default function App() {
 
   useEffect(() => {
     if (!status) return;
+    if (suppressNextStatusModalRef.current) {
+      suppressNextStatusModalRef.current = false;
+      return;
+    }
     const s = status.toLowerCase();
     if (s.includes('error') || s.includes('failed') || s.includes('issue')) {
       setShowStatusModal(true);
@@ -942,11 +947,7 @@ export default function App() {
       );
 
       const preflightValid = mergeTxCandidates.filter((_, i) => preflight[i].ok);
-      if (!preflightValid.length) {
-        const firstErr = JSON.stringify(preflight.find((p) => !p.ok)?.err ?? 'unknown preflight error');
-        throw new Error(`No merge transactions passed preflight (${firstErr}).`);
-      }
-      const mergeTxsToSend = preflightValid;
+      const mergeTxsToSend = preflightValid.length ? preflightValid : mergeTxCandidates;
       const skippedByPreflight = preflight.length - preflightValid.length;
 
       const chargedFeeSkr = FEATURE_FEE_ENABLED
@@ -1102,19 +1103,22 @@ export default function App() {
       }
 
       if (submittedMergeSigs.length === 0) {
-        throw new Error('No consolidation transactions were signed/submitted.');
+        suppressNextStatusModalRef.current = true;
+        setStatus('Consolidation submitted 0 signatures. No tx was accepted by wallet/network. Try sequential mode.');
+        return;
       }
 
       setSelected({});
       await refreshWalletBalances(wallet);
       const notes: string[] = [];
-      if (preflightValid.length && skippedByPreflight) notes.push(`skipped ${skippedByPreflight} preflight-failed`);
+      if (preflightValid.length && skippedByPreflight) notes.push(`skipped ${skippedByPreflight} preflight-flagged`);
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
       setStatus(`✅ Consolidation submitted (${submittedMergeSigs.length} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
-      setStatus(actionError('Consolidation error', e));
+      suppressNextStatusModalRef.current = true;
+      setStatus(`Consolidation: ${normalizeErrorMessage(e)}`);
     } finally {
       setBusy(false);
     }
