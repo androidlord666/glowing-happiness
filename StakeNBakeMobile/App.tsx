@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.32 (code 43)';
+const APP_VERSION_LABEL = 'v2.33 (code 44)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -431,9 +431,13 @@ export default function App() {
   const onPullRefresh = async () => {
     if (!wallet) return;
     setPullRefreshing(true);
+
+    // Make pull-to-refresh feel snappy; finish spinner early while sync continues.
+    const fallback = setTimeout(() => setPullRefreshing(false), 1800);
     try {
-      await loadStakeAccounts(wallet);
+      await loadStakeAccounts(wallet, { skipBalances: true });
     } finally {
+      clearTimeout(fallback);
       setPullRefreshing(false);
     }
   };
@@ -556,7 +560,7 @@ export default function App() {
     setScreen('landing');
   };
 
-  const loadStakeAccounts = async (walletOverride?: string) => {
+  const loadStakeAccounts = async (walletOverride?: string, opts?: { skipBalances?: boolean }) => {
     try {
       const activeWallet = walletOverride ?? wallet;
       if (!activeWallet) throw new Error('Connect wallet first');
@@ -591,7 +595,7 @@ export default function App() {
       refreshMetricsRef.current.count += 1;
       refreshMetricsRef.current.totalMs += elapsed;
 
-      const lazyTargets = seeded.slice(0, 30);
+      const lazyTargets = seeded.slice(0, 16);
       Promise.all(
         lazyTargets.map(async (a) => {
           try {
@@ -622,7 +626,9 @@ export default function App() {
         setDestination((firstDelegated ?? seeded[0]).pubkey);
       }
       setStatus(seeded.length ? `Loaded ${seeded.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
-      await refreshWalletBalances(activeWallet);
+      if (!opts?.skipBalances) {
+        await refreshWalletBalances(activeWallet);
+      }
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
