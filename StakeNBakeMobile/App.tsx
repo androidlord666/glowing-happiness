@@ -261,11 +261,18 @@ export default function App() {
     return () => clearTimeout(t);
   }, [status]);
 
-  const destinationOrderedAccounts = useMemo(() => {
-    const delegated = stakeAccounts.filter((a) => isDelegatedState(a.stakeState));
-    const undelegated = stakeAccounts.filter((a) => !isDelegatedState(a.stakeState));
-    return [...delegated, ...undelegated];
-  }, [stakeAccounts]);
+  const delegatedAccounts = useMemo(
+    () => stakeAccounts.filter((a) => isDelegatedState(a.stakeState)),
+    [stakeAccounts]
+  );
+  const undelegatedAccounts = useMemo(
+    () => stakeAccounts.filter((a) => !isDelegatedState(a.stakeState)),
+    [stakeAccounts]
+  );
+  const destinationOrderedAccounts = useMemo(
+    () => [...undelegatedAccounts, ...delegatedAccounts],
+    [undelegatedAccounts, delegatedAccounts]
+  );
 
   const sourceStakeAccounts = useMemo(() => {
     const raw = stakeAccounts.filter((a) => a.pubkey !== destination);
@@ -504,7 +511,8 @@ export default function App() {
       if (!seeded.length) {
         setDestination('');
       } else if (!destination || !seeded.some((i) => i.pubkey === destination)) {
-        setDestination(seeded[0].pubkey);
+        const firstUndelegated = seeded.find((i) => !isDelegatedState(i.stakeState));
+        setDestination((firstUndelegated ?? seeded[0]).pubkey);
       }
       setStatus(seeded.length ? `Loaded ${seeded.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
       await refreshWalletBalances(activeWallet);
@@ -1003,7 +1011,7 @@ export default function App() {
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
             {!!destinationOrderedAccounts.length && (
-              <Text style={styles.meta}>Destination order: delegated first, undelegated below.</Text>
+              <Text style={styles.meta}>Undelegated (ready to withdraw): {undelegatedAccounts.length} · Delegated: {delegatedAccounts.length}</Text>
             )}
             <FlatList
               data={destinationOrderedAccounts}
