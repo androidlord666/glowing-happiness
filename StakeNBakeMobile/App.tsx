@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.38 (code 49)';
+const APP_VERSION_LABEL = 'v2.39 (code 50)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -114,7 +114,8 @@ function isDelegatedState(state?: string): boolean {
 
 function isWithdrawReadyState(state?: string): boolean {
   const s = presentStakeState(state);
-  return s === 'undelegated' || s === 'inactive';
+  // In practice, some warming-up accounts can still be withdrawable.
+  return s === 'undelegated' || s === 'inactive' || s === 'activating';
 }
 
 function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
@@ -670,7 +671,7 @@ export default function App() {
       }
       setDestination(stakeAddress);
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Staked ${createStakeSol} SOL. Swipe down from top to sync new stake account state.`);
+      setStatus(`✅ Delegated ${createStakeSol} SOL to validator ${shortAddr(validatorVote)}. Swipe down from top to sync new stake account state.`);
     } catch (e: any) {
       setStatus(actionError('Create+stake error', e));
     } finally {
@@ -1284,7 +1285,7 @@ export default function App() {
             />
             <View style={styles.row}>
               <ActionButton
-                label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create + Stake'}
+                label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create + Delegate'}
                 onPress={onCreateStake}
                 disabled={pullRefreshing}
               />
