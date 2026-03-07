@@ -51,8 +51,8 @@ type SourceFilter = 'all' | 'mergeable' | 'high';
 const MAX_SOURCE_ACCOUNTS = 99;
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
-const PLATFORM_FEE_PER_SOURCE_SKR = 10;
-const PLATFORM_FEE_CAP_SKR = 100;
+const PLATFORM_FEE_PER_SOURCE_SKR = 25;
+const PLATFORM_FEE_CAP_SKR = 250;
 
 function shortAddr(v: string) {
   if (!v) return '';
