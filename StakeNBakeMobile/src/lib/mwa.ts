@@ -1,5 +1,5 @@
 import { Buffer } from 'buffer';
-import { PublicKey, Transaction } from '@solana/web3.js';
+import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
 import { ClusterName } from '../config';
 
 export type WalletSession = {
@@ -9,7 +9,7 @@ export type WalletSession = {
 export type WalletAdapter = {
   connect(cluster: ClusterName): Promise<WalletSession>;
   disconnect(): Promise<void>;
-  signAndSendTransactions(txs: Transaction[]): Promise<string[]>;
+  signAndSendTransactions(txs: Array<Transaction | VersionedTransaction>): Promise<string[]>;
 };
 
 type MwAccountLike = {
@@ -105,7 +105,7 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
     this.authToken = null;
   }
 
-  async signAndSendTransactions(txs: Transaction[]): Promise<string[]> {
+  async signAndSendTransactions(txs: Array<Transaction | VersionedTransaction>): Promise<string[]> {
     if (!this.address) throw new Error('Wallet not connected');
     const transact = await this.loadTransact();
 
@@ -143,7 +143,7 @@ export class MockWalletAdapter implements WalletAdapter {
     this.address = null;
   }
 
-  async signAndSendTransactions(_txs: Transaction[]): Promise<string[]> {
+  async signAndSendTransactions(_txs: Array<Transaction | VersionedTransaction>): Promise<string[]> {
     if (!this.address) throw new Error('Wallet not connected');
     return ['mock-signature'];
   }

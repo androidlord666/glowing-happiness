@@ -17,7 +17,7 @@ import {
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
-import { LAMPORTS_PER_SOL, StakeProgram, Transaction } from '@solana/web3.js';
+import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
   createAssociatedTokenAccountInstruction,
   createTransferCheckedInstruction,
@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.21 (code 32)';
+const APP_VERSION_LABEL = 'v2.22 (code 33)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -171,6 +171,7 @@ export default function App() {
   const [swapDir, setSwapDir] = useState<'SOL_TO_SKR' | 'SKR_TO_SOL'>('SOL_TO_SKR');
   const [swapSlippageBps, setSwapSlippageBps] = useState(100);
   const [swapQuoteText, setSwapQuoteText] = useState('');
+  const [swapQuote, setSwapQuote] = useState<any>(null);
   const [swapBusy, setSwapBusy] = useState(false);
   const [snsPreview, setSnsPreview] = useState('');
   const [snsPreviewBusy, setSnsPreviewBusy] = useState(false);
@@ -274,6 +275,11 @@ export default function App() {
     if (!selected[destination]) return;
     setSelected((prev) => ({ ...prev, [destination]: false }));
   }, [destination, selected]);
+
+  useEffect(() => {
+    setSwapQuote(null);
+    setSwapQuoteText('');
+  }, [swapDir, swapAmount, swapSlippageBps]);
 
   useEffect(() => {
     if (!status) return;
@@ -832,6 +838,7 @@ export default function App() {
       const res = await fetch(url, { headers: { 'x-api-key': JUPITER_API_KEY } });
       if (!res.ok) throw new Error(`Jupiter quote failed (${res.status})`);
       const q: any = await res.json();
+      setSwapQuote(q);
       const outRaw = Number(q?.outAmount ?? 0);
       if (!outRaw) throw new Error('No quote output amount');
       const outUi = outRaw / Math.pow(10, 9);
@@ -839,6 +846,49 @@ export default function App() {
       setSwapQuoteText(`Quote: ~${outUi.toFixed(6)} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
     } catch (e: any) {
       setSwapQuoteText(`Quote error: ${normalizeErrorMessage(e)}`);
+    } finally {
+      setSwapBusy(false);
+    }
+  };
+
+  const executeSwapInApp = async () => {
+    try {
+      if (!wallet) throw new Error('Connect wallet first');
+      if (!swapQuote) throw new Error('Get a quote first');
+      setSwapBusy(true);
+      setStatus('Building Jupiter swap transaction...');
+
+      const res = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-api-key': JUPITER_API_KEY,
+        },
+        body: JSON.stringify({
+          userPublicKey: wallet,
+          quoteResponse: swapQuote,
+          wrapAndUnwrapSol: true,
+          dynamicComputeUnitLimit: true,
+        }),
+      });
+
+      if (!res.ok) throw new Error(`Jupiter swap build failed (${res.status})`);
+      const data: any = await res.json();
+      if (!data?.swapTransaction) throw new Error('No swap transaction returned');
+
+      const raw = Buffer.from(data.swapTransaction, 'base64');
+      const vtx = VersionedTransaction.deserialize(raw);
+      const sigs = await walletAdapter.signAndSendTransactions([vtx as any]);
+      if (sigs[0]) {
+        rememberTx(sigs[0]);
+        trackPendingTx(sigs[0], 'Swap transaction');
+        setStatus('✅ Swap submitted. Confirming...');
+        await connection.confirmTransaction(sigs[0], 'confirmed');
+        setStatus('✅ Swap confirmed. Refreshing balances...');
+        await refreshWalletBalances(wallet);
+      }
+    } catch (e: any) {
+      setStatus(actionError('Swap error', e));
     } finally {
       setSwapBusy(false);
     }
@@ -1212,10 +1262,11 @@ export default function App() {
             />
             <View style={styles.row}>
               <ActionButton label={swapBusy ? 'Quoting…' : 'Get Quote'} onPress={fetchSwapQuote} />
-              <ActionButton label="Open Jupiter" onPress={openJupiterSwap} />
+              <ActionButton label={swapBusy ? 'Swapping…' : 'Swap Now'} onPress={executeSwapInApp} />
+              <ActionButton label="Jupiter Web" onPress={openJupiterSwap} />
             </View>
             {!!swapQuoteText && <Text style={styles.meta}>{swapQuoteText}</Text>}
-            <Text style={styles.meta}>Execution opens Jupiter to complete signed swap.</Text>
+            <Text style={styles.meta}>Swap executes in-app via Jupiter tx; web button is fallback.</Text>
           </Animated.View>
         )}
 
