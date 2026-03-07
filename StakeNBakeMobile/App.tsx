@@ -50,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.31 (code 42)';
+const APP_VERSION_LABEL = 'v2.32 (code 43)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -809,7 +809,31 @@ export default function App() {
         },
       });
 
-      let txBatch = [...txs];
+      setStatus('Preflighting consolidation transactions...');
+      const validMergeTxs: Transaction[] = [];
+      const failedMergeReasons: string[] = [];
+      for (let i = 0; i < txs.length; i++) {
+        const sim = await connection.simulateTransaction(txs[i], {
+          sigVerify: false,
+          replaceRecentBlockhash: true,
+          commitment: 'confirmed',
+        });
+        if (sim.value.err) {
+          failedMergeReasons.push(`src ${i + 1}: ${JSON.stringify(sim.value.err)}`);
+          continue;
+        }
+        validMergeTxs.push(txs[i]);
+      }
+
+      if (!validMergeTxs.length) {
+        throw new Error(`No compatible source accounts for merge. ${failedMergeReasons[0] ?? ''}`.trim());
+      }
+
+      if (failedMergeReasons.length) {
+        setStatus(`Skipping ${failedMergeReasons.length} incompatible source(s).`);
+      }
+
+      let txBatch = [...validMergeTxs];
       if (consolidationFeeSkr > 0) {
         const owner = asPublicKey(wallet);
         const mint = asPublicKey(SKR_MINT);
@@ -877,12 +901,12 @@ export default function App() {
         if (!sig) return;
         rememberTx(sig);
         const isFeeTx = consolidationFeeSkr > 0 && i === txBatch.length - 1;
-        trackPendingTx(sig, isFeeTx ? 'Platform fee transaction (SKR)' : `Consolidation tx ${i + 1}/${txs.length}`);
+        trackPendingTx(sig, isFeeTx ? 'Platform fee transaction (SKR)' : `Consolidation tx ${i + 1}/${validMergeTxs.length}`);
       });
 
       setSelected({});
       await refreshWalletBalances(wallet);
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx, fee ${consolidationFeeSkrText} SKR). Swipe down from top to sync stake state.`);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx; merged ${validMergeTxs.length}/${txs.length} source tx; fee ${consolidationFeeSkrText} SKR). Swipe down from top to sync stake state.`);
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
