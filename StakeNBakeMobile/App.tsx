@@ -824,48 +824,14 @@ export default function App() {
       const lamports = accountInfo.lamports;
       if (lamports <= 0) throw new Error('No lamports available to withdraw from this stake account.');
 
-      const parsedInfo = await connection.getParsedAccountInfo(stakePubkey, 'confirmed').catch(() => null);
-      const rentReserveRaw = (parsedInfo?.value?.data as any)?.parsed?.info?.meta?.rentExemptReserve;
-      const rentReserve = Number(rentReserveRaw ?? 0);
-      const lamportCandidates = Array.from(
-        new Set(
-          [
-            lamports,
-            lamports - 1,
-            Number.isFinite(rentReserve) && rentReserve > 0 ? lamports - rentReserve : 0,
-          ].filter((v) => Number.isSafeInteger(v) && v > 0)
-        )
-      );
-      if (!lamportCandidates.length) {
-        throw new Error('No valid withdraw amount found for this stake account.');
-      }
-
       setStatus('Submitting withdraw transaction...');
-      let tx: Transaction | null = null;
-      let simErr: any = null;
-      for (const candidateLamports of lamportCandidates) {
-        const candidateTx = await buildWithdrawStakeTx({
-          connection,
-          owner: asPublicKey(wallet),
-          stakeAccount: asPublicKey(target),
-          to: asPublicKey(wallet),
-          lamports: candidateLamports,
-        });
-        const sim = await connection.simulateTransaction(candidateTx as any, {
-          sigVerify: false,
-          replaceRecentBlockhash: true,
-          commitment: 'confirmed',
-        } as any);
-        if (!sim?.value?.err) {
-          tx = candidateTx;
-          simErr = null;
-          break;
-        }
-        simErr = sim.value.err;
-      }
-      if (!tx) {
-        throw new Error(`Withdraw not ready for ${shortAddr(target)} yet (${JSON.stringify(simErr ?? 'simulation failed')}).`);
-      }
+      const tx = await buildWithdrawStakeTx({
+        connection,
+        owner: asPublicKey(wallet),
+        stakeAccount: asPublicKey(target),
+        to: asPublicKey(wallet),
+        lamports,
+      });
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       if (sigs[0]) {
@@ -877,7 +843,8 @@ export default function App() {
         setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}. Swipe down from top to sync stake list.`);
       }
     } catch (e: any) {
-      setStatus(actionError('Withdraw error', e));
+      suppressNextStatusModalRef.current = true;
+      setStatus('Withdraw not submitted. Check account state and try again.');
     } finally {
       setBusy(false);
     }
