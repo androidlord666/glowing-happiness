@@ -96,6 +96,10 @@ function presentStakeState(state?: string): string {
   return state;
 }
 
+function isDelegatedState(state?: string): boolean {
+  return presentStakeState(state) === 'delegated';
+}
+
 async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt <= retries; attempt++) {
@@ -249,10 +253,18 @@ export default function App() {
     return () => clearTimeout(t);
   }, [status]);
 
-  const sourceStakeAccounts = useMemo(
-    () => stakeAccounts.filter((a) => a.pubkey !== destination),
-    [stakeAccounts, destination]
-  );
+  const destinationOrderedAccounts = useMemo(() => {
+    const delegated = stakeAccounts.filter((a) => isDelegatedState(a.stakeState));
+    const undelegated = stakeAccounts.filter((a) => !isDelegatedState(a.stakeState));
+    return [...delegated, ...undelegated];
+  }, [stakeAccounts]);
+
+  const sourceStakeAccounts = useMemo(() => {
+    const raw = stakeAccounts.filter((a) => a.pubkey !== destination);
+    const delegated = raw.filter((a) => isDelegatedState(a.stakeState));
+    const undelegated = raw.filter((a) => !isDelegatedState(a.stakeState));
+    return [...delegated, ...undelegated];
+  }, [stakeAccounts, destination]);
 
   const filteredSourceStakeAccounts = useMemo(() => {
     let items = [...sourceStakeAccounts];
@@ -561,7 +573,7 @@ export default function App() {
         trackPendingTx(sigs[0], 'Unstake transaction');
         setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
-        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}.`);
+        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. It will appear undelegated after deactivation/epoch processing.`);
         await refreshSoon();
       }
     } catch (e: any) {
@@ -925,9 +937,12 @@ export default function App() {
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
-            {!stakeAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
+            {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
+            {!!destinationOrderedAccounts.length && (
+              <Text style={styles.meta}>Destination order: delegated first, undelegated below.</Text>
+            )}
             <FlatList
-              data={stakeAccounts}
+              data={destinationOrderedAccounts}
               keyExtractor={(a) => `dest-${a.pubkey}`}
               scrollEnabled={false}
               initialNumToRender={12}
@@ -955,7 +970,7 @@ export default function App() {
               />
             </View>
 
-            <Text style={styles.meta}>Source stake accounts (excluding destination)</Text>
+            <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, undelegated below)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only · supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
