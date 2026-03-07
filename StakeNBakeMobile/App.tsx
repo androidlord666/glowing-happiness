@@ -173,17 +173,16 @@ function parseEpoch(value: unknown): bigint | null {
   }
 }
 
-function deriveDelegationState(parsed: any, currentEpoch?: bigint): string | undefined {
-  const baseType = String(parsed?.type ?? '').toLowerCase();
+function deriveDelegationStateFromInfo(info: StakeAccountInfo, currentEpoch?: bigint): string | undefined {
+  const baseType = String(info.stakeType ?? '').toLowerCase();
   if (!baseType) return undefined;
   if (baseType === 'initialized' || baseType === 'uninitialized') return 'undelegated';
   if (baseType !== 'delegated' && baseType !== 'stake') return baseType;
 
   if (currentEpoch === undefined) return 'delegated';
 
-  const delegation = parsed?.info?.stake?.delegation;
-  const activationEpoch = parseEpoch(delegation?.activationEpoch);
-  const deactivationEpoch = parseEpoch(delegation?.deactivationEpoch);
+  const activationEpoch = parseEpoch(info.activationEpoch);
+  const deactivationEpoch = parseEpoch(info.deactivationEpoch);
   if (activationEpoch === null || deactivationEpoch === null) return 'delegated';
 
   if (deactivationEpoch !== U64_MAX_EPOCH) {
@@ -192,25 +191,6 @@ function deriveDelegationState(parsed: any, currentEpoch?: bigint): string | und
   }
   if (currentEpoch < activationEpoch) return 'activating';
   return 'active';
-}
-
-async function getStakeParsedMeta(connection: any, account: string, currentEpoch?: bigint): Promise<StakeParsedMeta> {
-  const pubkey = asPublicKey(account);
-  const info: any = await withRetries<any>(
-    () => connection.getParsedAccountInfo(pubkey, 'confirmed'),
-    1,
-    250
-  );
-  const parsed = (info.value?.data as any)?.parsed;
-  const stake = parsed?.info?.stake;
-
-  let delegationState = deriveDelegationState(parsed, currentEpoch);
-  if (!delegationState && parsed?.type) delegationState = String(parsed.type);
-
-  return {
-    delegationVote: stake?.delegation?.voter,
-    delegationState,
-  };
 }
 
 export default function App() {
@@ -263,8 +243,10 @@ export default function App() {
   const [consolidationSendMode, setConsolidationSendMode] = useState<ConsolidationSendMode>('sequential');
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
+  const pullShift = useRef(new Animated.Value(0)).current;
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
   const lastRefreshAtRef = useRef(0);
+  const refreshInProgressRef = useRef(false);
   const refreshMetricsRef = useRef({ count: 0, totalMs: 0 });
 
   const palette = theme === 'dark'
@@ -479,6 +461,7 @@ export default function App() {
 
   const onPullRefresh = async () => {
     if (!wallet) return;
+    Animated.timing(pullShift, { toValue: 10, duration: 120, useNativeDriver: true }).start();
     setPullRefreshing(true);
 
     // Make pull-to-refresh feel snappy; finish spinner early while sync continues.
@@ -488,7 +471,20 @@ export default function App() {
     } finally {
       clearTimeout(fallback);
       setPullRefreshing(false);
+      Animated.spring(pullShift, { toValue: 0, useNativeDriver: true, speed: 20, bounciness: 5 }).start();
     }
+  };
+
+  const onMainScroll = (e: any) => {
+    if (pullRefreshing) return;
+    const y = e?.nativeEvent?.contentOffset?.y ?? 0;
+    const shift = y < 0 ? Math.min(14, -y * 0.22) : 0;
+    pullShift.setValue(shift);
+  };
+
+  const onMainScrollEnd = () => {
+    if (pullRefreshing) return;
+    Animated.spring(pullShift, { toValue: 0, useNativeDriver: true, speed: 24, bounciness: 4 }).start();
   };
 
   const allFilteredSelected = useMemo(() => {
@@ -609,6 +605,12 @@ export default function App() {
     try {
       const activeWallet = walletOverride ?? wallet;
       if (!activeWallet) throw new Error('Connect wallet first');
+      if (refreshInProgressRef.current) {
+        if (lastStakeAccountsRef.current.length) {
+          setStakeAccounts(lastStakeAccountsRef.current);
+        }
+        return;
+      }
 
       const now = Date.now();
       if (!walletOverride && now - lastRefreshAtRef.current < 3500) {
@@ -620,6 +622,7 @@ export default function App() {
       }
 
       lastRefreshAtRef.current = now;
+      refreshInProgressRef.current = true;
       if (!opts?.skipBusy) setBusy(true);
       setStatus('Refreshing stake accounts...');
       const startedAt = Date.now();
@@ -630,26 +633,15 @@ export default function App() {
         500
       );
 
-      // Accuracy-first: resolve stake state for all accounts in this refresh pass.
-      const seeded = items.map((a) => ({ ...a, stakeState: a.stakeState ?? 'syncing' }));
-      setRpcHealth('healthy');
-      setStakeAccounts(seeded);
-
       const epochInfo = await connection.getEpochInfo('confirmed').catch(() => null);
       const currentEpoch = epochInfo?.epoch !== undefined ? BigInt(epochInfo.epoch) : undefined;
-
-      const resolved = await Promise.all(
-        seeded.map(async (a) => {
-          try {
-            const meta = await getStakeParsedMeta(connection, a.pubkey, currentEpoch);
-            return { ...a, stakeState: meta.delegationState ?? 'unknown' };
-          } catch {
-            return { ...a, stakeState: 'unknown' };
-          }
-        })
-      );
+      const resolved = items.map((a) => ({
+        ...a,
+        stakeState: deriveDelegationStateFromInfo(a, currentEpoch) ?? 'unknown',
+      }));
 
       lastStakeAccountsRef.current = resolved;
+      setRpcHealth('healthy');
       setStakeAccounts(resolved);
 
       const elapsed = Date.now() - startedAt;
@@ -686,6 +678,7 @@ export default function App() {
         setStatus(actionError('Refresh failed', e));
       }
     } finally {
+      refreshInProgressRef.current = false;
       if (!opts?.skipBusy) setBusy(false);
     }
   };
@@ -835,10 +828,20 @@ export default function App() {
       setBusy(true);
       setStatus('Validating merge eligibility...');
 
-      const [destMeta, ...sourceMeta] = await Promise.all([
-        getStakeParsedMeta(connection, destination),
-        ...sourceSelectedKeys.map((k) => getStakeParsedMeta(connection, k)),
-      ]);
+      const stakeMap = new Map(stakeAccounts.map((a) => [a.pubkey, a] as const));
+      const destinationAccount = stakeMap.get(destination);
+      if (!destinationAccount) throw new Error('Destination stake account not found in current list. Refresh and try again.');
+      const destMeta: StakeParsedMeta = {
+        delegationVote: destinationAccount.delegationVote,
+        delegationState: destinationAccount.stakeState,
+      };
+      const sourceMeta: StakeParsedMeta[] = sourceSelectedKeys.map((k) => {
+        const src = stakeMap.get(k);
+        return {
+          delegationVote: src?.delegationVote,
+          delegationState: src?.stakeState,
+        };
+      });
       const eligibilityReasons: string[] = [];
       const eligibleSourceKeys = sourceSelectedKeys.filter((key, idx) => {
         const meta = sourceMeta[idx];
@@ -1392,6 +1395,11 @@ export default function App() {
       <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
       <ScrollView
         contentContainerStyle={styles.content}
+        style={{ transform: [{ translateY: pullShift }] }}
+        onScroll={onMainScroll}
+        onScrollEndDrag={onMainScrollEnd}
+        onMomentumScrollEnd={onMainScrollEnd}
+        scrollEventThrottle={16}
         refreshControl={
           <RefreshControl
             refreshing={pullRefreshing}
@@ -1514,7 +1522,6 @@ export default function App() {
                 disabled={!canConsolidate || pullRefreshing}
               />
             </View>
-            <Text style={styles.meta}>Swipe down from top near Mainnet to refresh.</Text>
 
             <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, undelegated below)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>

@@ -9,6 +9,10 @@ export type StakeAccountInfo = {
   pubkey: string;
   lamports: number;
   stakeState?: string;
+  delegationVote?: string;
+  activationEpoch?: string;
+  deactivationEpoch?: string;
+  stakeType?: string;
 };
 
 export function createConnection(cluster: ClusterName): Connection {
@@ -33,19 +37,30 @@ export async function fetchStakeAccounts(
     try {
       const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
       const [asStaker, asWithdrawer] = await Promise.all([
-        conn.getProgramAccounts(STAKE_PROGRAM_ID, {
+        conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+          commitment: 'confirmed',
           filters: [{ memcmp: { offset: AUTH_STAKER_OFFSET, bytes: ownerKey } }],
         }),
-        conn.getProgramAccounts(STAKE_PROGRAM_ID, {
+        conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+          commitment: 'confirmed',
           filters: [{ memcmp: { offset: AUTH_WITHDRAWER_OFFSET, bytes: ownerKey } }],
         }),
       ]);
 
       sawSuccessfulQuery = true;
       for (const a of [...asStaker, ...asWithdrawer]) {
+        const parsed = (a.account.data as any)?.parsed;
+        const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
+        const delegation = parsed?.info?.stake?.delegation;
         merged.set(a.pubkey.toBase58(), {
           pubkey: a.pubkey.toBase58(),
           lamports: a.account.lamports,
+          delegationVote: delegation?.voter,
+          activationEpoch:
+            delegation?.activationEpoch !== undefined ? String(delegation.activationEpoch) : undefined,
+          deactivationEpoch:
+            delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
+          stakeType,
         });
       }
     } catch (e: any) {
