@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.20 (code 31)';
+const APP_VERSION_LABEL = 'v2.21 (code 32)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -1029,11 +1029,24 @@ export default function App() {
             <ActionButton label="Disconnect" onPress={disconnectWallet} />
           </View>
 
-          <View style={styles.row}>
-            <ActionButton label="Staking" onPress={() => setMode('stake')} />
-            <ActionButton label="Send" onPress={() => setMode('send')} />
-            <ActionButton label="Receive" onPress={() => setMode('receive')} />
-            <ActionButton label="Swap" onPress={() => setMode('swap')} />
+          <View style={styles.modeTabsRow}>
+            {([
+              ['stake', 'Staking'],
+              ['send', 'Send'],
+              ['receive', 'Receive'],
+              ['swap', 'Swap'],
+            ] as const).map(([k, label]) => {
+              const active = mode === k;
+              return (
+                <Pressable
+                  key={k}
+                  onPress={() => setMode(k)}
+                  style={[styles.modeTabBtn, active && styles.modeTabBtnActive]}
+                >
+                  <Text style={[styles.modeTabTxt, active && styles.modeTabTxtActive]}>{label}</Text>
+                </Pressable>
+              );
+            })}
           </View>
         </View>
 
@@ -1434,6 +1447,29 @@ const styles = StyleSheet.create({
     borderColor: '#8ADFD3',
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
+  modeTabsRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },
+  modeTabBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: '#101824',
+    borderRadius: 10,
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  modeTabBtnActive: {
+    borderColor: '#00D7C8',
+    backgroundColor: '#14F195',
+  },
+  modeTabTxt: {
+    color: '#D6EFEA',
+    fontSize: 13,
+    fontWeight: '700',
+  },
+  modeTabTxtActive: {
+    color: '#072225',
+  },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 4 },
   headerLogo: { width: 240, height: 40 },
