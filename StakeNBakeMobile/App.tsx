@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'mergeable' | 'high';
 
-const APP_VERSION_LABEL = 'v2.13 (code 24)';
+const APP_VERSION_LABEL = 'v2.14 (code 25)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -127,12 +127,24 @@ type StakeParsedMeta = {
 };
 
 async function getStakeParsedMeta(connection: any, account: string): Promise<StakeParsedMeta> {
-  const info = await connection.getParsedAccountInfo(asPublicKey(account), 'confirmed');
+  const pubkey = asPublicKey(account);
+  const info = await connection.getParsedAccountInfo(pubkey, 'confirmed');
   const parsed = (info.value?.data as any)?.parsed;
   const stake = parsed?.info?.stake;
+
+  let delegationState = parsed?.type as string | undefined;
+  if (delegationState === 'delegated') {
+    try {
+      const activation = await connection.getStakeActivation(pubkey, 'confirmed');
+      if (activation?.state) delegationState = activation.state;
+    } catch {
+      // keep delegated fallback when activation lookup is unavailable
+    }
+  }
+
   return {
     delegationVote: stake?.delegation?.voter,
-    delegationState: parsed?.type,
+    delegationState,
   };
 }
 
@@ -593,7 +605,19 @@ export default function App() {
         trackPendingTx(sigs[0], 'Unstake transaction');
         setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
-        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. It will appear undelegated after deactivation/epoch processing.`);
+        let nextHint = 'Waiting for deactivation/epoch processing before withdraw.';
+        try {
+          const [activation, epochInfo] = await Promise.all([
+            connection.getStakeActivation(asPublicKey(destination), 'confirmed'),
+            connection.getEpochInfo('confirmed'),
+          ]);
+          if (activation?.state) {
+            nextHint = `State: ${activation.state} (epoch ${epochInfo.epoch}). Withdraw enables when inactive/undelegated.`;
+          }
+        } catch {
+          // keep default hint
+        }
+        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint}`);
         await refreshSoon();
       }
     } catch (e: any) {
