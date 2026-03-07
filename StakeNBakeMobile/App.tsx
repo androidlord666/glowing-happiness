@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.18 (code 29)';
+const APP_VERSION_LABEL = 'v2.19 (code 30)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -88,7 +88,7 @@ function normalizeErrorMessage(e: any): string {
   const raw = String(e?.message ?? e ?? 'unknown error');
   const kind = classifyError(e);
   if (kind === 'user') return 'Transaction cancelled by user.';
-  if (kind === 'rpc') return `RPC issue: ${raw}`;
+  if (kind === 'rpc') return 'please wait, rpc 😎🙏';
   if (kind === 'wallet') return `Wallet issue: ${raw}`;
   if (kind === 'chain') return `Chain/state issue: ${raw}`;
   return raw;
