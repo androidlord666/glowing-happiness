@@ -13,6 +13,7 @@ import {
   Easing,
   Image,
   FlatList,
+  AppState,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import QRCode from 'react-native-qrcode-svg';
@@ -147,6 +148,7 @@ export default function App() {
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
   const [confirmConsolidate, setConfirmConsolidate] = useState(false);
   const [showFeePolicy, setShowFeePolicy] = useState(false);
+  const [isAppActive, setIsAppActive] = useState(true);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
@@ -200,6 +202,7 @@ export default function App() {
   }, [screen, landingFade]);
 
   useEffect(() => {
+    if (!isAppActive) return;
     const candidate = sendTo.trim();
     if (!candidate.toLowerCase().endsWith('.sol')) {
       setSnsPreview('');
@@ -224,7 +227,7 @@ export default function App() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [sendTo, connection]);
+  }, [sendTo, connection, isAppActive]);
 
   useEffect(() => {
     if (!destination) return;
@@ -303,6 +306,27 @@ export default function App() {
   }, [cluster]);
 
   useEffect(() => {
+    const sub = AppState.addEventListener('change', (next) => {
+      const active = next === 'active';
+      setIsAppActive(active);
+      if (!active) {
+        setShowSettings(false);
+        setConfirmConsolidate(false);
+        setShowFeePolicy(false);
+      }
+    });
+    return () => sub.remove();
+  }, []);
+
+  useEffect(() => {
+    if (!isAppActive) return;
+    if (!wallet) return;
+    loadStakeAccounts(wallet).catch(() => {});
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAppActive]);
+
+  useEffect(() => {
+    if (!isAppActive) return;
     if (!pendingTxs.length) return;
     const t = setInterval(async () => {
       try {
@@ -330,7 +354,7 @@ export default function App() {
     }, 3500);
 
     return () => clearInterval(t);
-  }, [pendingTxs, connection]);
+  }, [pendingTxs, connection, isAppActive]);
 
   const connectWallet = async () => {
     if (busy) return;
