@@ -48,7 +48,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.26 (code 37)';
+const APP_VERSION_LABEL = 'v2.27 (code 38)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -392,11 +392,6 @@ export default function App() {
     });
   };
 
-  const refreshSoon = async (delayMs = 1200) => {
-    await new Promise<void>((resolve) => setTimeout(() => resolve(), delayMs));
-    await loadStakeAccounts();
-  };
-
   const refreshWalletBalances = async (walletAddr?: string) => {
     const active = walletAddr ?? wallet;
     if (!active) return;
@@ -491,7 +486,8 @@ export default function App() {
         });
         if (done.size) {
           setPendingTxs((prev) => prev.filter((p) => !done.has(p.sig)));
-          await refreshSoon(300);
+          await refreshWalletBalances();
+          setStatus('Transaction confirmed. Tap Refresh to sync stake-account state.');
         }
       } catch {
         // no-op
@@ -597,8 +593,8 @@ export default function App() {
       if (!seeded.length) {
         setDestination('');
       } else if (!destination || !seeded.some((i) => i.pubkey === destination)) {
-        const firstUndelegated = seeded.find((i) => !isDelegatedState(i.stakeState));
-        setDestination((firstUndelegated ?? seeded[0]).pubkey);
+        const firstDelegated = seeded.find((i) => isDelegatedState(i.stakeState));
+        setDestination((firstDelegated ?? seeded[0]).pubkey);
       }
       setStatus(seeded.length ? `Loaded ${seeded.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
       await refreshWalletBalances(activeWallet);
@@ -651,8 +647,8 @@ export default function App() {
         await connection.confirmTransaction(sigs[0], 'confirmed');
       }
       setDestination(stakeAddress);
-      setStatus(`✅ Staked ${createStakeSol} SOL to Solana Mobile validator.`);
-      await refreshSoon();
+      await refreshWalletBalances(wallet);
+      setStatus(`✅ Staked ${createStakeSol} SOL. Tap Refresh to sync new stake account state.`);
     } catch (e: any) {
       setStatus(actionError('Create+stake error', e));
     } finally {
@@ -691,8 +687,8 @@ export default function App() {
         } catch {
           // keep default hint
         }
-        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint}`);
-        await refreshSoon();
+        await refreshWalletBalances(wallet);
+        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint} Tap Refresh to update list.`);
       }
     } catch (e: any) {
       setStatus(actionError('Unstake error', e));
@@ -736,8 +732,8 @@ export default function App() {
         trackPendingTx(sigs[0], 'Withdraw transaction');
         setStatus(`💸 Withdraw submitted for ${shortAddr(destination)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
-        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}.`);
-        await refreshSoon();
+        await refreshWalletBalances(wallet);
+        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}. Tap Refresh to sync stake list.`);
       }
     } catch (e: any) {
       setStatus(actionError('Withdraw error', e));
@@ -860,8 +856,8 @@ export default function App() {
       });
 
       setSelected({});
-      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx, fee ${consolidationFeeSkrText} SKR). Refreshing accounts...`);
-      await refreshSoon();
+      await refreshWalletBalances(wallet);
+      setStatus(`✅ Consolidation submitted (${sigs.length}/${txBatch.length} tx, fee ${consolidationFeeSkrText} SKR). Tap Refresh to sync stake state.`);
     } catch (e: any) {
       setStatus(actionError('Consolidation error', e));
     } finally {
