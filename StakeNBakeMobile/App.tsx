@@ -110,7 +110,7 @@ function presentStakeState(state?: string): string {
 
 function displayStakeState(state?: string): string {
   const s = presentStakeState(state);
-  if (s === 'undelegated') return 'Undelegated (withdraw-ready)';
+  if (s === 'undelegated') return 'Inactive (withdraw-ready)';
   if (s === 'active') return 'Active';
   if (s === 'activating') return 'Activating (can unstake)';
   if (s === 'deactivating') return 'Deactivating (wait epoch)';
@@ -121,7 +121,8 @@ function displayStakeState(state?: string): string {
 }
 
 function isInactiveState(state?: string): boolean {
-  return presentStakeState(state) === 'inactive';
+  const s = presentStakeState(state);
+  return s === 'inactive' || s === 'undelegated';
 }
 
 function isDelegatedState(state?: string): boolean {
@@ -765,7 +766,7 @@ export default function App() {
             connection.getEpochInfo('confirmed'),
           ]);
           if (activation?.state) {
-            nextHint = `State: ${activation.state} (epoch ${epochInfo.epoch}). Withdraw enables when inactive/undelegated.`;
+            nextHint = `State: ${activation.state} (epoch ${epochInfo.epoch}). Withdraw enables when inactive.`;
           }
         } catch {
           // keep default hint
@@ -1547,14 +1548,14 @@ export default function App() {
                 {destination ? displayStakeState(destinationState) : 'Select destination'}
               </Text>
             </Text>
-            <Text style={styles.meta}>Withdraw is enabled only when state is Undelegated or Inactive.</Text>
+            <Text style={styles.meta}>Withdraw is enabled only when state is Inactive.</Text>
 
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
             <Text style={styles.meta}>Destination stake account (from connected wallet authority)</Text>
             {!destinationOrderedAccounts.length && <Text style={styles.meta}>No stake accounts available yet.</Text>}
             {!!destinationOrderedAccounts.length && (
-            <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Undelegated/Inactive: {undelegatedAccounts.length} · Delegated (Active/Activating/Deactivating): {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
+            <Text style={styles.meta}>Withdraw-ready: {withdrawReadyAccounts.length} · Inactive: {undelegatedAccounts.length} · Active/Activating/Deactivating: {delegatedAccounts.length} · Syncing: {stakeAccounts.filter((a) => presentStakeState(a.stakeState) === 'syncing').length}</Text>
             )}
             {!!withdrawReadyAccounts.length && (
               <Text style={styles.link} onPress={() => setDestination(withdrawReadyAccounts[0].pubkey)}>
@@ -1589,7 +1590,7 @@ export default function App() {
               />
             </View>
 
-            <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, undelegated below)</Text>
+            <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, inactive below)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only · supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
@@ -1876,7 +1877,7 @@ export default function App() {
             <Text style={styles.label}>What's New · {APP_VERSION_LABEL}</Text>
             <Text style={styles.meta}>• SKR-only consolidation fee model</Text>
             <Text style={styles.meta}>• Fee policy + no-hidden-fees transparency</Text>
-            <Text style={styles.meta}>• Withdraw flow and undelegated handling improved</Text>
+            <Text style={styles.meta}>• Withdraw flow and inactive-account handling improved</Text>
             <Text style={styles.meta}>• Wallet box now shows SOL and SKR balances</Text>
             <Text style={styles.meta}>• Lifecycle/app-switch stability hardening</Text>
             <ActionButton label="Close" onPress={() => setShowWhatsNew(false)} />
@@ -1888,7 +1889,7 @@ export default function App() {
         <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Quick Tips</Text>
-            <Text style={styles.meta}>• Unstake (deactivate) first, then withdraw when undelegated.</Text>
+            <Text style={styles.meta}>• Unstake (deactivate) first, then withdraw when inactive.</Text>
             <Text style={styles.meta}>• Consolidation fee is always shown before you sign.</Text>
             <Text style={styles.meta}>• Use Refresh after confirmations to sync balances and state.</Text>
             <ActionButton label="Got it" onPress={() => setShowTips(false)} />
