@@ -1519,7 +1519,7 @@ export default function App() {
             <View style={styles.stakeActionRow}>
               <View style={styles.stakeActionCell}>
                 <ActionButton
-                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create + Delegate'}
+                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create Stake'}
                   onPress={onCreateStake}
                   disabled={pullRefreshing}
                   fullWidth
