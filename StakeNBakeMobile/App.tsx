@@ -1474,22 +1474,31 @@ export default function App() {
               onChangeText={setCreateStakeSol}
               keyboardType="decimal-pad"
             />
-            <View style={styles.row}>
-              <ActionButton
-                label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create + Delegate'}
-                onPress={onCreateStake}
-                disabled={pullRefreshing}
-              />
-              <ActionButton
-                label={pullRefreshing ? 'Refreshing…' : busy ? 'Unstaking…' : 'Unstake'}
-                onPress={onUnstake}
-                disabled={pullRefreshing}
-              />
-              <ActionButton
-                label={pullRefreshing ? 'Refreshing…' : busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
-                onPress={onWithdraw}
-                disabled={!canWithdraw || pullRefreshing}
-              />
+            <View style={styles.stakeActionRow}>
+              <View style={styles.stakeActionCell}>
+                <ActionButton
+                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create + Delegate'}
+                  onPress={onCreateStake}
+                  disabled={pullRefreshing}
+                  fullWidth
+                />
+              </View>
+              <View style={styles.stakeActionCell}>
+                <ActionButton
+                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Unstaking…' : 'Unstake'}
+                  onPress={onUnstake}
+                  disabled={pullRefreshing}
+                  fullWidth
+                />
+              </View>
+              <View style={styles.stakeActionCell}>
+                <ActionButton
+                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
+                  onPress={onWithdraw}
+                  disabled={!canWithdraw || pullRefreshing}
+                  fullWidth
+                />
+              </View>
             </View>
             <Text style={styles.meta}>Withdraw status: {destination ? destinationState : 'select destination'}</Text>
 
@@ -1929,6 +1938,8 @@ const styles = StyleSheet.create({
     borderColor: '#8ADFD3',
   },
   row: { flexDirection: 'row', marginBottom: 6, flexWrap: 'wrap', gap: 8 },
+  stakeActionRow: { flexDirection: 'row', marginBottom: 6, gap: 8 },
+  stakeActionCell: { flex: 1 },
   equalBtnRow: { flexDirection: 'row', gap: 8, marginBottom: 6 },
   equalBtnCell: { flex: 1 },
   modeTabsRow: { flexDirection: 'row', gap: 6, marginBottom: 8 },

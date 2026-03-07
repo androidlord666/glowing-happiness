@@ -5,15 +5,18 @@ export function ActionButton({
   label,
   onPress,
   disabled,
+  fullWidth,
 }: {
   label: string;
   onPress: () => void;
   disabled?: boolean;
+  fullWidth?: boolean;
 }) {
   return (
     <Pressable
       style={({ pressed }) => [
         styles.btn,
+        fullWidth && styles.btnFullWidth,
         disabled && styles.btnDisabled,
         pressed && !disabled && styles.btnPressed,
       ]}
@@ -34,6 +37,10 @@ const styles = StyleSheet.create({
     paddingVertical: 10,
     paddingHorizontal: 16,
     marginRight: 8,
+  },
+  btnFullWidth: {
+    width: '100%',
+    marginRight: 0,
   },
   btnPressed: {
     transform: [{ scale: 0.98 }],
