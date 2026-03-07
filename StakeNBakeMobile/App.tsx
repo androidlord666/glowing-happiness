@@ -1,4 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
+import { Buffer } from 'buffer';
 import {
   Linking,
   SafeAreaView,
@@ -49,7 +50,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 
-const APP_VERSION_LABEL = 'v2.29 (code 40)';
+const APP_VERSION_LABEL = 'v2.30 (code 41)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -1447,7 +1448,7 @@ export default function App() {
           </Animated.View>
         )}
 
-        {!!status && <Text style={styles.statusMuted}>{status}</Text>
+        {!!status && <Text style={styles.statusMuted}>{status}</Text>}
         {!!lastSignature && (
           <View>
             <Text style={styles.meta}>Latest tx: {shortAddr(lastSignature)}</Text>
