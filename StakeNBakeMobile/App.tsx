@@ -139,6 +139,10 @@ function isWithdrawReadyState(state?: string): boolean {
   return s === 'undelegated' || s === 'inactive';
 }
 
+function hasWithdrawableLamports(lamports?: number): boolean {
+  return Number(lamports ?? 0) > STAKE_RENT_RESERVE_LAMPORTS;
+}
+
 function isMergeStateCompatible(destinationState?: string, sourceState?: string): boolean {
   const dest = presentStakeState(destinationState);
   const source = presentStakeState(sourceState);
@@ -215,10 +219,11 @@ function deriveDelegationStateFromInfo(info: StakeAccountInfo, currentEpoch?: bi
   if (activationEpoch === null || deactivationEpoch === null) return 'delegated';
 
   if (deactivationEpoch !== U64_MAX_EPOCH) {
-    if (currentEpoch >= deactivationEpoch) return 'inactive';
+    // deactivationEpoch is when cooldown starts; it is reliably inactive after that epoch.
+    if (currentEpoch > deactivationEpoch) return 'inactive';
     return 'deactivating';
   }
-  if (currentEpoch < activationEpoch) return 'activating';
+  if (currentEpoch <= activationEpoch) return 'activating';
   return 'active';
 }
 
@@ -446,12 +451,18 @@ export default function App() {
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
   const withdrawReadyAccounts = useMemo(
-    () => stakeAccounts.filter((a) => isWithdrawReadyState(a.stakeState) && a.canWithdraw !== false),
+    () =>
+      stakeAccounts.filter(
+        (a) => isWithdrawReadyState(a.stakeState) && a.canWithdraw !== false && hasWithdrawableLamports(a.lamports)
+      ),
     [stakeAccounts]
   );
   const withdrawTarget = useMemo(
-    () => (destination && isWithdrawReadyState(destinationState) ? destination : withdrawReadyAccounts[0]?.pubkey ?? ''),
-    [destination, destinationState, withdrawReadyAccounts]
+    () =>
+      destination && isWithdrawReadyState(destinationState) && hasWithdrawableLamports(stakeAccounts.find((a) => a.pubkey === destination)?.lamports)
+        ? destination
+        : withdrawReadyAccounts[0]?.pubkey ?? '',
+    [destination, destinationState, withdrawReadyAccounts, stakeAccounts]
   );
   const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!withdrawTarget;
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
@@ -834,6 +845,10 @@ export default function App() {
       if (withdrawLamports <= 0) {
         throw new Error('No withdrawable lamports yet. Wait for full deactivation and refresh.');
       }
+      const activation = await connection.getStakeActivation(stakePubkey, 'confirmed').catch(() => null);
+      if (activation?.state && activation.state !== 'inactive') {
+        throw new Error(`Stake state is ${activation.state}; withdraw requires inactive.`);
+      }
 
       setStatus('Submitting withdraw transaction...');
       const tx = await buildWithdrawStakeTx({
@@ -851,7 +866,8 @@ export default function App() {
         setStatus(`💸 Withdraw submitted for ${shortAddr(target)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
         await refreshWalletBalances(wallet);
-        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}. Swipe down from top to sync stake list.`);
+        await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
+        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}.`);
       }
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
