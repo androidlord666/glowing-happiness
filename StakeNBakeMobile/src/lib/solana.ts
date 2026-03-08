@@ -13,6 +13,8 @@ export type StakeAccountInfo = {
   activationEpoch?: string;
   deactivationEpoch?: string;
   stakeType?: string;
+  canStake?: boolean;
+  canWithdraw?: boolean;
 };
 
 export function createConnection(cluster: ClusterName): Connection {
@@ -48,12 +50,14 @@ export async function fetchStakeAccounts(
       ]);
 
       sawSuccessfulQuery = true;
-      for (const a of [...asStaker, ...asWithdrawer]) {
+      for (const a of asStaker) {
+        const key = a.pubkey.toBase58();
         const parsed = (a.account.data as any)?.parsed;
         const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
         const delegation = parsed?.info?.stake?.delegation;
-        merged.set(a.pubkey.toBase58(), {
-          pubkey: a.pubkey.toBase58(),
+        const existing = merged.get(key);
+        merged.set(key, {
+          pubkey: key,
           lamports: a.account.lamports,
           delegationVote: delegation?.voter,
           activationEpoch:
@@ -61,6 +65,28 @@ export async function fetchStakeAccounts(
           deactivationEpoch:
             delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
           stakeType,
+          canStake: true,
+          canWithdraw: existing?.canWithdraw ?? false,
+        });
+      }
+
+      for (const a of asWithdrawer) {
+        const parsed = (a.account.data as any)?.parsed;
+        const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
+        const delegation = parsed?.info?.stake?.delegation;
+        const key = a.pubkey.toBase58();
+        const existing = merged.get(key);
+        merged.set(key, {
+          pubkey: key,
+          lamports: a.account.lamports,
+          delegationVote: delegation?.voter,
+          activationEpoch:
+            delegation?.activationEpoch !== undefined ? String(delegation.activationEpoch) : undefined,
+          deactivationEpoch:
+            delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
+          stakeType,
+          canStake: existing?.canStake ?? false,
+          canWithdraw: true,
         });
       }
     } catch (e: any) {

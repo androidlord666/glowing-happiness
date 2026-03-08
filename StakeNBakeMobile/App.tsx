@@ -66,6 +66,7 @@ const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
 const PLATFORM_FEE_PER_SOURCE_SKR = 10;
 const PLATFORM_FEE_CAP_SKR = 100;
 const MAX_BATCH_TX_PER_REQUEST = 12;
+const STAKE_RENT_RESERVE_LAMPORTS = 2_282_880;
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -443,7 +444,7 @@ export default function App() {
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
   const withdrawReadyAccounts = useMemo(
-    () => stakeAccounts.filter((a) => isWithdrawReadyState(a.stakeState)),
+    () => stakeAccounts.filter((a) => isWithdrawReadyState(a.stakeState) && a.canWithdraw !== false),
     [stakeAccounts]
   );
   const withdrawTarget = useMemo(
@@ -819,7 +820,6 @@ export default function App() {
 
       const stakePubkey = asPublicKey(target);
       const accountInfo = await connection.getAccountInfo(stakePubkey, 'confirmed');
-      const parsedInfo = await connection.getParsedAccountInfo(stakePubkey, 'confirmed').catch(() => null);
 
       if (!accountInfo) throw new Error('Stake account not found. Refresh and try again.');
       if (!accountInfo.owner.equals(StakeProgram.programId)) {
@@ -828,11 +828,7 @@ export default function App() {
 
       const lamports = accountInfo.lamports;
       if (lamports <= 0) throw new Error('No lamports available to withdraw from this stake account.');
-      const rentReserveRaw = (parsedInfo?.value?.data as any)?.parsed?.info?.meta?.rentExemptReserve;
-      const rentReserve = Number(rentReserveRaw ?? 0);
-      const withdrawLamports = Number.isFinite(rentReserve) && rentReserve > 0
-        ? Math.max(0, lamports - Math.floor(rentReserve))
-        : lamports;
+      const withdrawLamports = Math.max(0, lamports - STAKE_RENT_RESERVE_LAMPORTS);
       if (withdrawLamports <= 0) {
         throw new Error('No withdrawable lamports yet. Wait for full deactivation and refresh.');
       }
