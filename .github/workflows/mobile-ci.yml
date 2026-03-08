@@ -1,15 +1,11 @@
 name: mobile-ci
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - 'StakeNBakeMobile/**'
-      - '.github/workflows/mobile-ci.yml'
   pull_request:
     paths:
       - 'StakeNBakeMobile/**'
       - '.github/workflows/mobile-ci.yml'
+  workflow_dispatch:
 
 jobs:
   build-android-debug:
