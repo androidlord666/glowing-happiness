@@ -66,8 +66,10 @@ jobs:
 
       - name: Verify JS bundle embedded
         run: |
-          test -f app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle
-          ls -lh app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle
+          APK="app/build/outputs/apk/release/app-release.apk"
+          test -f "$APK"
+          unzip -l "$APK" | grep -q "assets/index.android.bundle"
+          unzip -l "$APK" | grep "assets/index.android.bundle"
 
       - name: Generate release changelog
         working-directory: .
