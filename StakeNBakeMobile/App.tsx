@@ -85,7 +85,6 @@ const PLATFORM_FEE_CAP_SKR = 100;
 // Solana Mobile Wallet Adapter payload limits vary by wallet/runtime.
 // Keep batch requests small for high reliability; 99-source runs are still supported via chunking.
 const MAX_BATCH_TX_PER_REQUEST = 3;
-const STAKE_RENT_RESERVE_LAMPORTS = 2_282_880;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
 const TX_LIFECYCLE_STORAGE_KEY = '@stakeNbake:txLifecycleEvents:v1';
 
@@ -159,7 +158,7 @@ function isWithdrawReadyState(state?: string): boolean {
 }
 
 function hasWithdrawableLamports(lamports?: number): boolean {
-  return Number(lamports ?? 0) > STAKE_RENT_RESERVE_LAMPORTS;
+  return Number(lamports ?? 0) > 0;
 }
 
 function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccountInfo | null, sourceMeta?: StakeParsedMeta | StakeAccountInfo | null): boolean {
@@ -977,7 +976,8 @@ export default function App() {
 
       const lamports = accountInfo.lamports;
       if (lamports <= 0) throw new Error('No lamports available to withdraw from this stake account.');
-      const withdrawLamports = Math.max(0, lamports - STAKE_RENT_RESERVE_LAMPORTS);
+      // Withdraw full balance to close the stake account in one transaction.
+      const withdrawLamports = lamports;
       if (withdrawLamports <= 0) {
         throw new Error('No withdrawable lamports yet. Wait for full deactivation and refresh.');
       }
@@ -986,7 +986,7 @@ export default function App() {
         throw new Error(`Stake state is ${activation.state}; withdraw requires inactive.`);
       }
 
-      setStatus('Submitting withdraw transaction...');
+      setStatus('Submitting full-balance withdraw (account will close)...');
       const tx = await buildWithdrawStakeTx({
         connection,
         owner: asPublicKey(wallet),
@@ -1001,6 +1001,15 @@ export default function App() {
         trackPendingTx(sigs[0], 'Withdraw transaction');
         setStatus(`💸 Withdraw submitted for ${shortAddr(target)}. Confirming...`);
         await connection.confirmTransaction(sigs[0], 'confirmed');
+        // Optimistically remove closed account from list to avoid dust-withdraw confusion.
+        setStakeAccounts((prev) => prev.filter((a) => a.pubkey !== target));
+        setSelected((prev) => {
+          if (!prev[target]) return prev;
+          const next = { ...prev };
+          delete next[target];
+          return next;
+        });
+        if (destination === target) setDestination('');
         await refreshWalletBalances(wallet);
         await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
         setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}.`);
