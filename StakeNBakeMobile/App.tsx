@@ -1095,13 +1095,9 @@ export default function App() {
             for (let i = 0; i < txIndexes.length; i++) {
               const sig = sigs[i];
               if (!sig) {
-                // Retry missing entries one-by-one rather than failing whole batch.
-                try {
-                  await submitSingleMergeTx(txIndexes[i]);
-                } catch (e: any) {
-                  if (classifyError(e) === 'user') throw e;
-                  failedMergeCount += 1;
-                }
+                // Do not auto-retry missing signatures: wallet may have already submitted
+                // the transaction and retrying can create duplicate sends.
+                failedMergeCount += 1;
                 continue;
               }
               rememberTx(sig);
@@ -1110,15 +1106,9 @@ export default function App() {
             }
           } catch (e: any) {
             if (classifyError(e) === 'user') throw e;
-            // Wallet rejected chunk payload; degrade to per-tx submit for this chunk.
-            for (const txIndex of txIndexes) {
-              try {
-                await submitSingleMergeTx(txIndex);
-              } catch (singleErr: any) {
-                if (classifyError(singleErr) === 'user') throw singleErr;
-                failedMergeCount += 1;
-              }
-            }
+            // Do not auto-fallback/resubmit on chunk errors; this can double-submit
+            // if wallet partially accepted the batch before returning an error.
+            failedMergeCount += txIndexes.length;
           }
           globalIdx += chunkLen;
         }
