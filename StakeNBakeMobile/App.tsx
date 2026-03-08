@@ -71,7 +71,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.45 (code 56)';
+const APP_VERSION_LABEL = 'v2.46 (code 57)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -596,28 +596,46 @@ export default function App() {
     try {
       const owner = asPublicKey(active);
       const mint = asPublicKey(SKR_MINT);
-      const [lamportsProcessed, lamportsConfirmed, tokenProgramAccounts, token2022Accounts, mintScopedAccounts] = await Promise.all([
-        connection.getBalance(owner, 'processed').catch(() => null),
-        connection.getBalance(owner, 'confirmed').catch(() => null),
-        connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }, 'processed').catch(() => null),
-        connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }, 'processed').catch(() => null),
-        connection.getParsedTokenAccountsByOwner(owner, { mint }, 'processed').catch(() => null),
-      ]);
+
+      const readOnce = async (commitment: 'processed' | 'confirmed' | 'finalized') => {
+        const [lamports, tokenProgramAccounts, token2022Accounts, mintScopedAccounts] = await Promise.all([
+          connection.getBalance(owner, commitment).catch(() => null),
+          connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }, commitment).catch(() => null),
+          connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }, commitment).catch(() => null),
+          connection.getParsedTokenAccountsByOwner(owner, { mint }, commitment).catch(() => null),
+        ]);
+        return { lamports, tokenProgramAccounts, token2022Accounts, mintScopedAccounts };
+      };
+
+      let read = await readOnce('processed');
+      if (read.lamports == null) {
+        // Retry at higher commitment before giving up so we don't clobber balances to zero.
+        read = await readOnce('confirmed');
+      }
+      if (read.lamports == null) {
+        read = await readOnce('finalized');
+      }
+
+      if (typeof read.lamports === 'number') {
+        setWalletSolBalance((read.lamports / LAMPORTS_PER_SOL).toFixed(4));
+      }
 
       const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
       const allRows = [
-        ...(tokenProgramAccounts?.value ?? []),
-        ...(token2022Accounts?.value ?? []),
-        ...(mintScopedAccounts?.value ?? []),
+        ...(read.tokenProgramAccounts?.value ?? []),
+        ...(read.token2022Accounts?.value ?? []),
+        ...(read.mintScopedAccounts?.value ?? []),
       ];
       const seen = new Set<string>();
       let totalRaw = 0n;
+      let sawSkrAccount = false;
       for (const row of allRows) {
         const pubkey = row?.pubkey?.toBase58?.() ?? String(row?.pubkey ?? '');
         if (!pubkey || seen.has(pubkey)) continue;
         seen.add(pubkey);
         const info = (row.account.data as any)?.parsed?.info;
         if (String(info?.mint ?? '') !== SKR_MINT) continue;
+        sawSkrAccount = true;
         try {
           totalRaw += BigInt(String(info?.tokenAmount?.amount ?? '0'));
         } catch {
@@ -625,17 +643,18 @@ export default function App() {
         }
       }
 
-      let skrUiAmount = formatRawAmount(totalRaw.toString(), decimals, 6);
-      if (skrUiAmount === '0') {
-        // Final fallback: direct ATA lookup if parsed queries are unavailable.
+      if (sawSkrAccount) {
+        setWalletSkrBalance(formatRawAmount(totalRaw.toString(), decimals, 6));
+      } else {
+        // Fallback ATA check; if unavailable, keep previous value instead of forcing 0.
         const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-        const ataBal = await connection.getTokenAccountBalance(ownerAta, 'processed').catch(() => null);
-        if (ataBal?.value?.uiAmountString != null) skrUiAmount = ataBal.value.uiAmountString;
+        const ataBal =
+          (await connection.getTokenAccountBalance(ownerAta, 'processed').catch(() => null)) ??
+          (await connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null));
+        if (ataBal?.value?.uiAmountString != null) {
+          setWalletSkrBalance(ataBal.value.uiAmountString);
+        }
       }
-
-      const lamports = lamportsProcessed ?? lamportsConfirmed ?? 0;
-      setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
-      setWalletSkrBalance(skrUiAmount);
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
     }
