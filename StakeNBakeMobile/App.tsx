@@ -2127,9 +2127,10 @@ export default function App() {
           <ActionButton label="Export Logs (Share)" onPress={exportLogsToShare} />
           <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
           <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
+          <Text style={styles.settingsFooter}>built with ❤️ by rasetsukyo</Text>
 
-          </View>
-        )}
+        </View>
+      )}
 
         {confirmConsolidate && (
           <View style={styles.confirmOverlay}>
@@ -2371,6 +2372,12 @@ const styles = StyleSheet.create({
     padding: 12,
     gap: 8,
     zIndex: 20,
+  },
+  settingsFooter: {
+    color: colors.muted,
+    fontSize: 11,
+    textAlign: 'center',
+    marginTop: 6,
   },
   dropdownBox: {
     borderWidth: 1,
