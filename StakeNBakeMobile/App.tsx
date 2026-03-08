@@ -2,7 +2,6 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Buffer } from 'buffer';
 import {
   Linking,
-  SafeAreaView,
   ScrollView,
   StatusBar,
   StyleSheet,
@@ -16,9 +15,11 @@ import {
   FlatList,
   AppState,
   RefreshControl,
+  Share,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
+import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
@@ -1666,6 +1667,32 @@ export default function App() {
     setStatus('TX lifecycle report copied.');
   };
 
+  const exportLogsToShare = async () => {
+    try {
+      const payload = {
+        app: 'stakeNbake',
+        version: APP_VERSION_LABEL,
+        cluster,
+        explorer,
+        wallet,
+        status,
+        txLifecycleEvents,
+        recentTxs: txHistory,
+        generatedAt: new Date().toISOString(),
+      };
+      const body = JSON.stringify(payload, null, 2);
+      const encoded = Buffer.from(body, 'utf8').toString('base64');
+      await Share.share({
+        title: 'stakeNbake-logs.json',
+        message: body,
+        url: `data:application/json;base64,${encoded}`,
+      });
+      setStatus('Logs export opened in share sheet.');
+    } catch (e: any) {
+      setStatus(actionError('Log export error', e));
+    }
+  };
+
   const copyFeeWallet = () => {
     Clipboard.setString(PLATFORM_FEE_WALLET);
     setStatus('Fee wallet copied.');
@@ -1689,36 +1716,41 @@ export default function App() {
   if (screen === 'splash') {
     const whitePhase = splashPhase === 0;
     return (
-      <SafeAreaView style={[styles.root, styles.centered, whitePhase ? styles.splashRootLight : styles.splashRootDark]}>
-        <StatusBar barStyle={whitePhase ? 'dark-content' : 'light-content'} />
-        <Image
-          source={whitePhase ? solanaMobileBlackLogo : solanaMobileWhiteLogo}
-          style={styles.splashLogo}
-          resizeMode="contain"
-        />
-      </SafeAreaView>
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.root, styles.centered, whitePhase ? styles.splashRootLight : styles.splashRootDark]}>
+          <StatusBar barStyle={whitePhase ? 'dark-content' : 'light-content'} />
+          <Image
+            source={whitePhase ? solanaMobileBlackLogo : solanaMobileWhiteLogo}
+            style={styles.splashLogo}
+            resizeMode="contain"
+          />
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   if (screen === 'landing') {
     return (
-      <SafeAreaView style={[styles.root, styles.centered, styles.landingRootDark]}>
-        <StatusBar barStyle={'light-content'} />
-        <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
-          <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
-          <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
-          <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
-          <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
-          <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
-        </Animated.View>
-      </SafeAreaView>
+      <SafeAreaProvider>
+        <SafeAreaView style={[styles.root, styles.centered, styles.landingRootDark]}>
+          <StatusBar barStyle={'light-content'} />
+          <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
+            <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
+            <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
+            <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
+            <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
+            <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
+          </Animated.View>
+        </SafeAreaView>
+      </SafeAreaProvider>
     );
   }
 
   return (
-    <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
-      <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
-      <ScrollView
+    <SafeAreaProvider>
+      <SafeAreaView style={[styles.root, { backgroundColor: palette.bg }]}>
+        <StatusBar barStyle={theme === 'dark' ? 'light-content' : 'dark-content'} />
+        <ScrollView
         contentContainerStyle={styles.content}
         style={{ transform: [{ translateY: pullShift }] }}
         onScroll={onMainScroll}
@@ -2080,14 +2112,14 @@ export default function App() {
             ))}
           </View>
         )}
-      </ScrollView>
+        </ScrollView>
 
-      <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnTopRight}>
-        <Text style={styles.gearIcon}>⚙️</Text>
-      </Pressable>
+        <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnTopRight}>
+          <Text style={styles.gearIcon}>⚙️</Text>
+        </Pressable>
 
-      {showSettings && (
-        <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
+        {showSettings && (
+          <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight, { color: palette.text }]}>Settings</Text>
           <View style={styles.row}>
             <Text style={styles.meta}>Network: Mainnet</Text>
@@ -2114,14 +2146,15 @@ export default function App() {
           <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
           <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
           <ActionButton label="Copy TX Lifecycle Report" onPress={copyTxLifecycleReport} />
+          <ActionButton label="Export Logs (Share)" onPress={exportLogsToShare} />
           <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
           <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
 
-        </View>
-      )}
+          </View>
+        )}
 
-      {confirmConsolidate && (
-        <View style={styles.confirmOverlay}>
+        {confirmConsolidate && (
+          <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Confirm consolidation</Text>
             <Text style={styles.meta}>Destination: {shortAddr(destination)}</Text>
@@ -2153,21 +2186,21 @@ export default function App() {
               />
             </View>
           </View>
-        </View>
-      )}
+          </View>
+        )}
 
-      {showStatusModal && !!status && (
-        <View style={styles.confirmOverlay}>
+        {showStatusModal && !!status && (
+          <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Notice</Text>
             <Text style={styles.meta}>{status}</Text>
             <ActionButton label="OK" onPress={() => { setShowStatusModal(false); setStatus(''); }} />
           </View>
-        </View>
-      )}
+          </View>
+        )}
 
-      {showFeePolicy && (
-        <View style={styles.confirmOverlay}>
+        {showFeePolicy && (
+          <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Fee Policy</Text>
             <Text style={styles.meta}>Token: SKR only</Text>
@@ -2178,11 +2211,11 @@ export default function App() {
             <Text style={styles.meta}>No hidden fees.</Text>
             <ActionButton label="Close" onPress={() => setShowFeePolicy(false)} />
           </View>
-        </View>
-      )}
+          </View>
+        )}
 
-      {showWhatsNew && (
-        <View style={styles.confirmOverlay}>
+        {showWhatsNew && (
+          <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>What's New · {APP_VERSION_LABEL}</Text>
             <Text style={styles.meta}>• SKR-only consolidation fee model</Text>
@@ -2193,11 +2226,11 @@ export default function App() {
             <Text style={styles.meta}>• Consolidation preflight + tx lifecycle reporting + idempotency guard</Text>
             <ActionButton label="Close" onPress={() => setShowWhatsNew(false)} />
           </View>
-        </View>
-      )}
+          </View>
+        )}
 
-      {showTips && (
-        <View style={styles.confirmOverlay}>
+        {showTips && (
+          <View style={styles.confirmOverlay}>
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Quick Tips</Text>
             <Text style={styles.meta}>• Create stake above rent-exempt minimum (tiny amounts fail by design).</Text>
@@ -2207,9 +2240,10 @@ export default function App() {
             <Text style={styles.meta}>• Pull down on the app to refresh balances and account states.</Text>
             <ActionButton label="Got it" onPress={() => setShowTips(false)} />
           </View>
-        </View>
-      )}
-    </SafeAreaView>
+          </View>
+        )}
+      </SafeAreaView>
+    </SafeAreaProvider>
   );
 }
 
