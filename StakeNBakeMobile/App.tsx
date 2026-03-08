@@ -71,7 +71,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.48 (code 59)';
+const APP_VERSION_LABEL = 'v2.49 (code 60)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -90,6 +90,11 @@ const PLATFORM_FEE_CAP_SKR = 100;
 const DEFAULT_BATCH_TX_PER_REQUEST: ConsolidationBatchChunkSize = 3;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
 const TX_LIFECYCLE_STORAGE_KEY = '@stakeNbake:txLifecycleEvents:v1';
+const STAKE_SNAPSHOT_CACHE_PREFIX = '@stakeNbake:stakeSnapshot:v1';
+
+function getStakeSnapshotCacheKey(cluster: ClusterName, wallet: string): string {
+  return `${STAKE_SNAPSHOT_CACHE_PREFIX}:${cluster}:${wallet}`;
+}
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -348,6 +353,8 @@ export default function App() {
   const lastStakeAccountsRef = useRef<StakeAccountInfo[]>([]);
   const lastRefreshAtRef = useRef(0);
   const refreshInProgressRef = useRef(false);
+  const hydrateSeqRef = useRef(0);
+  const cachePrimedKeyRef = useRef('');
   const refreshMetricsRef = useRef({ count: 0, totalMs: 0 });
   const consolidationInFlightRef = useRef(false);
   const consolidationIdempotencyRef = useRef<Record<string, number>>({});
@@ -675,6 +682,30 @@ export default function App() {
     }
   }, [connection, wallet, skrDecimals]);
 
+  const applyStakeAccountsToUi = useCallback((items: StakeAccountInfo[], options?: { fromCache?: boolean }) => {
+    lastStakeAccountsRef.current = items;
+    setStakeAccounts(items);
+    setSelected((prev) => {
+      const valid = new Set(items.map((i) => i.pubkey));
+      const next: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        if (v && valid.has(k)) next[k] = true;
+      }
+      return next;
+    });
+    if (!items.length) {
+      setDestination('');
+    } else if (!destination || !items.some((i) => i.pubkey === destination)) {
+      const firstDelegated = items.find((i) => isDelegatedState(i.stakeState));
+      setDestination((firstDelegated ?? items[0]).pubkey);
+    }
+    if (options?.fromCache) {
+      setStatus(items.length ? `Loaded ${items.length} cached stake account(s). Syncing…` : 'No cached stake accounts.');
+    } else {
+      setStatus(items.length ? `Loaded ${items.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
+    }
+  }, [destination]);
+
   const onPullRefresh = async () => {
     if (!wallet) return;
     Animated.timing(pullShift, { toValue: 10, duration: 120, useNativeDriver: true }).start();
@@ -854,6 +885,23 @@ export default function App() {
     try {
       const activeWallet = walletOverride ?? wallet;
       if (!activeWallet) throw new Error('Connect wallet first');
+      const cacheKey = getStakeSnapshotCacheKey(cluster, activeWallet);
+      const cachePrimeKey = `${cluster}:${activeWallet}`;
+      if (cachePrimedKeyRef.current !== cachePrimeKey) {
+        cachePrimedKeyRef.current = cachePrimeKey;
+        AsyncStorage.getItem(cacheKey)
+          .then((raw) => {
+            if (!raw) return;
+            const parsed = JSON.parse(raw) as { items?: StakeAccountInfo[] };
+            const cachedItems = Array.isArray(parsed?.items) ? parsed.items : [];
+            if (!cachedItems.length) return;
+            // Only use cache as fast-first paint before fresh network result arrives.
+            if (!lastStakeAccountsRef.current.length) {
+              applyStakeAccountsToUi(cachedItems, { fromCache: true });
+            }
+          })
+          .catch(() => {});
+      }
       if (refreshInProgressRef.current) {
         if (lastStakeAccountsRef.current.length) {
           setStakeAccounts(lastStakeAccountsRef.current);
@@ -888,33 +936,25 @@ export default function App() {
         ...a,
         stakeState: deriveDelegationStateFromInfo(a, currentEpoch) ?? 'unknown',
       }));
-      const resolved = await hydrateStakeStatesFromChain(connection, resolvedFromParsed);
-
-      lastStakeAccountsRef.current = resolved;
       setRpcHealth('healthy');
-      setStakeAccounts(resolved);
+      applyStakeAccountsToUi(resolvedFromParsed);
+      AsyncStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), items: resolvedFromParsed })).catch(() => {});
 
       const elapsed = Date.now() - startedAt;
       refreshMetricsRef.current.count += 1;
       refreshMetricsRef.current.totalMs += elapsed;
-      setSelected((prev) => {
-        const valid = new Set(resolved.map((i) => i.pubkey));
-        const next: Record<string, boolean> = {};
-        for (const [k, v] of Object.entries(prev)) {
-          if (v && valid.has(k)) next[k] = true;
-        }
-        return next;
-      });
-      if (!resolved.length) {
-        setDestination('');
-      } else if (!destination || !resolved.some((i) => i.pubkey === destination)) {
-        const firstDelegated = resolved.find((i) => isDelegatedState(i.stakeState));
-        setDestination((firstDelegated ?? resolved[0]).pubkey);
-      }
-      setStatus(resolved.length ? `Loaded ${resolved.length} stake account(s)` : 'No stake accounts yet. Tap Create + Stake first.');
       if (!opts?.skipBalances) {
         await refreshWalletBalances(activeWallet);
       }
+
+      const hydrateSeq = ++hydrateSeqRef.current;
+      hydrateStakeStatesFromChain(connection, resolvedFromParsed)
+        .then((hydrated) => {
+          if (hydrateSeqRef.current !== hydrateSeq) return;
+          applyStakeAccountsToUi(hydrated);
+          AsyncStorage.setItem(cacheKey, JSON.stringify({ at: Date.now(), items: hydrated })).catch(() => {});
+        })
+        .catch(() => {});
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {

@@ -36,12 +36,10 @@ export async function fetchStakeAccounts(
   const fallbacks = cluster ? RPC_FALLBACK_URLS[cluster] ?? [] : [];
   const endpoints = [primaryEndpoint, ...fallbacks].filter(Boolean) as string[];
 
-  let lastError: any;
-  let sawSuccessfulQuery = false;
   const merged = new Map<string, StakeAccountInfo>();
-
-  for (const endpoint of endpoints.length ? endpoints : [RPC_URLS['mainnet-beta']]) {
-    try {
+  const candidateEndpoints = endpoints.length ? endpoints : [RPC_URLS['mainnet-beta']];
+  const endpointResults = await Promise.allSettled(
+    candidateEndpoints.map(async (endpoint) => {
       const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
       const [asStaker, asWithdrawer] = await Promise.all([
         conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
@@ -53,90 +51,98 @@ export async function fetchStakeAccounts(
           filters: [{ memcmp: { offset: AUTH_WITHDRAWER_OFFSET, bytes: ownerKey } }],
         }),
       ]);
+      return { asStaker, asWithdrawer };
+    })
+  );
 
-      sawSuccessfulQuery = true;
-      for (const a of asStaker) {
-        const key = a.pubkey.toBase58();
-        const parsed = (a.account.data as any)?.parsed;
-        const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
-        const delegation = parsed?.info?.stake?.delegation;
-        const incoming: StakeAccountInfo = {
-          pubkey: key,
-          lamports: a.account.lamports,
-          delegationVote: delegation?.voter,
-          activationEpoch:
-            delegation?.activationEpoch !== undefined ? String(delegation.activationEpoch) : undefined,
-          deactivationEpoch:
-            delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
-          stakeType,
-          canStake: true,
-          canWithdraw: false,
-        };
-        const existing = merged.get(key);
-        if (!existing) {
-          merged.set(key, incoming);
-          continue;
-        }
-
-        // Keep the freshest known delegation lifecycle flags across endpoints.
-        const keepExistingLifecycle =
-          isDeactivationStarted(existing.deactivationEpoch) && !isDeactivationStarted(incoming.deactivationEpoch);
-
-        merged.set(key, {
-          ...existing,
-          // Prefer existing lifecycle fields if they indicate a started cooldown and incoming looks stale.
-          activationEpoch: keepExistingLifecycle ? existing.activationEpoch : (incoming.activationEpoch ?? existing.activationEpoch),
-          deactivationEpoch: keepExistingLifecycle ? existing.deactivationEpoch : (incoming.deactivationEpoch ?? existing.deactivationEpoch),
-          stakeType: keepExistingLifecycle ? existing.stakeType : (incoming.stakeType ?? existing.stakeType),
-          delegationVote: keepExistingLifecycle ? existing.delegationVote : (incoming.delegationVote ?? existing.delegationVote),
-          // Union capabilities from staker/withdrawer views.
-          canStake: (existing.canStake ?? false) || (incoming.canStake ?? false),
-          canWithdraw: (existing.canWithdraw ?? false) || (incoming.canWithdraw ?? false),
-          // Lamports should reflect latest read if available.
-          lamports: incoming.lamports || existing.lamports,
-        });
+  let lastError: any;
+  let sawSuccessfulQuery = false;
+  for (const result of endpointResults) {
+    if (result.status !== 'fulfilled') {
+      lastError = result.reason;
+      continue;
+    }
+    sawSuccessfulQuery = true;
+    const { asStaker, asWithdrawer } = result.value;
+    for (const a of asStaker) {
+      const key = a.pubkey.toBase58();
+      const parsed = (a.account.data as any)?.parsed;
+      const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
+      const delegation = parsed?.info?.stake?.delegation;
+      const incoming: StakeAccountInfo = {
+        pubkey: key,
+        lamports: a.account.lamports,
+        delegationVote: delegation?.voter,
+        activationEpoch:
+          delegation?.activationEpoch !== undefined ? String(delegation.activationEpoch) : undefined,
+        deactivationEpoch:
+          delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
+        stakeType,
+        canStake: true,
+        canWithdraw: false,
+      };
+      const existing = merged.get(key);
+      if (!existing) {
+        merged.set(key, incoming);
+        continue;
       }
 
-      for (const a of asWithdrawer) {
-        const parsed = (a.account.data as any)?.parsed;
-        const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
-        const delegation = parsed?.info?.stake?.delegation;
-        const key = a.pubkey.toBase58();
-        const existing = merged.get(key);
-        const incoming: StakeAccountInfo = {
-          pubkey: key,
-          lamports: a.account.lamports,
-          delegationVote: delegation?.voter,
-          activationEpoch:
-            delegation?.activationEpoch !== undefined ? String(delegation.activationEpoch) : undefined,
-          deactivationEpoch:
-            delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
-          stakeType,
-          canStake: false,
-          canWithdraw: true,
-        };
+      // Keep the freshest known delegation lifecycle flags across endpoints.
+      const keepExistingLifecycle =
+        isDeactivationStarted(existing.deactivationEpoch) && !isDeactivationStarted(incoming.deactivationEpoch);
 
-        if (!existing) {
-          merged.set(key, incoming);
-          continue;
-        }
+      merged.set(key, {
+        ...existing,
+        // Prefer existing lifecycle fields if they indicate a started cooldown and incoming looks stale.
+        activationEpoch: keepExistingLifecycle ? existing.activationEpoch : (incoming.activationEpoch ?? existing.activationEpoch),
+        deactivationEpoch: keepExistingLifecycle ? existing.deactivationEpoch : (incoming.deactivationEpoch ?? existing.deactivationEpoch),
+        stakeType: keepExistingLifecycle ? existing.stakeType : (incoming.stakeType ?? existing.stakeType),
+        delegationVote: keepExistingLifecycle ? existing.delegationVote : (incoming.delegationVote ?? existing.delegationVote),
+        // Union capabilities from staker/withdrawer views.
+        canStake: (existing.canStake ?? false) || (incoming.canStake ?? false),
+        canWithdraw: (existing.canWithdraw ?? false) || (incoming.canWithdraw ?? false),
+        // Lamports should reflect latest read if available.
+        lamports: incoming.lamports || existing.lamports,
+      });
+    }
 
-        const keepExistingLifecycle =
-          isDeactivationStarted(existing.deactivationEpoch) && !isDeactivationStarted(incoming.deactivationEpoch);
+    for (const a of asWithdrawer) {
+      const parsed = (a.account.data as any)?.parsed;
+      const stakeType = typeof parsed?.type === 'string' ? parsed.type : undefined;
+      const delegation = parsed?.info?.stake?.delegation;
+      const key = a.pubkey.toBase58();
+      const existing = merged.get(key);
+      const incoming: StakeAccountInfo = {
+        pubkey: key,
+        lamports: a.account.lamports,
+        delegationVote: delegation?.voter,
+        activationEpoch:
+          delegation?.activationEpoch !== undefined ? String(delegation.activationEpoch) : undefined,
+        deactivationEpoch:
+          delegation?.deactivationEpoch !== undefined ? String(delegation.deactivationEpoch) : undefined,
+        stakeType,
+        canStake: false,
+        canWithdraw: true,
+      };
 
-        merged.set(key, {
-          ...existing,
-          activationEpoch: keepExistingLifecycle ? existing.activationEpoch : (incoming.activationEpoch ?? existing.activationEpoch),
-          deactivationEpoch: keepExistingLifecycle ? existing.deactivationEpoch : (incoming.deactivationEpoch ?? existing.deactivationEpoch),
-          stakeType: keepExistingLifecycle ? existing.stakeType : (incoming.stakeType ?? existing.stakeType),
-          delegationVote: keepExistingLifecycle ? existing.delegationVote : (incoming.delegationVote ?? existing.delegationVote),
-          canStake: (existing.canStake ?? false) || (incoming.canStake ?? false),
-          canWithdraw: (existing.canWithdraw ?? false) || (incoming.canWithdraw ?? false),
-          lamports: incoming.lamports || existing.lamports,
-        });
+      if (!existing) {
+        merged.set(key, incoming);
+        continue;
       }
-    } catch (e: any) {
-      lastError = e;
+
+      const keepExistingLifecycle =
+        isDeactivationStarted(existing.deactivationEpoch) && !isDeactivationStarted(incoming.deactivationEpoch);
+
+      merged.set(key, {
+        ...existing,
+        activationEpoch: keepExistingLifecycle ? existing.activationEpoch : (incoming.activationEpoch ?? existing.activationEpoch),
+        deactivationEpoch: keepExistingLifecycle ? existing.deactivationEpoch : (incoming.deactivationEpoch ?? existing.deactivationEpoch),
+        stakeType: keepExistingLifecycle ? existing.stakeType : (incoming.stakeType ?? existing.stakeType),
+        delegationVote: keepExistingLifecycle ? existing.delegationVote : (incoming.delegationVote ?? existing.delegationVote),
+        canStake: (existing.canStake ?? false) || (incoming.canStake ?? false),
+        canWithdraw: (existing.canWithdraw ?? false) || (incoming.canWithdraw ?? false),
+        lamports: incoming.lamports || existing.lamports,
+      });
     }
   }
 
