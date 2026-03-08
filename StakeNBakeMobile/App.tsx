@@ -230,6 +230,9 @@ function deriveDelegationStateFromInfo(info: StakeAccountInfo, currentEpoch?: bi
   if (activationEpoch === null || deactivationEpoch === null) return 'delegated';
 
   if (deactivationEpoch !== U64_MAX_EPOCH) {
+    // If stake was deactivated in the same epoch it was activated, it can be
+    // effectively inactive/withdrawable immediately.
+    if (activationEpoch === deactivationEpoch) return 'inactive';
     // deactivationEpoch is when cooldown starts; it is reliably inactive after that epoch.
     if (currentEpoch > deactivationEpoch) return 'inactive';
     return 'deactivating';
