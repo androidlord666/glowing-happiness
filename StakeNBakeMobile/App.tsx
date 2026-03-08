@@ -23,6 +23,8 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
+  TOKEN_2022_PROGRAM_ID,
+  TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferInstruction,
   getAssociatedTokenAddressSync,
@@ -69,7 +71,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.44 (code 55)';
+const APP_VERSION_LABEL = 'v2.45 (code 56)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -594,30 +596,44 @@ export default function App() {
     try {
       const owner = asPublicKey(active);
       const mint = asPublicKey(SKR_MINT);
-      const [lamports, parsedTokenAccounts] = await Promise.all([
-        connection.getBalance(owner, 'confirmed'),
-        connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed').catch(() => null),
+      const [lamportsProcessed, lamportsConfirmed, tokenProgramAccounts, token2022Accounts, mintScopedAccounts] = await Promise.all([
+        connection.getBalance(owner, 'processed').catch(() => null),
+        connection.getBalance(owner, 'confirmed').catch(() => null),
+        connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }, 'processed').catch(() => null),
+        connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }, 'processed').catch(() => null),
+        connection.getParsedTokenAccountsByOwner(owner, { mint }, 'processed').catch(() => null),
       ]);
 
-      let skrUiAmount = '0';
-      if (parsedTokenAccounts?.value?.length) {
-        const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
-        const totalRaw = parsedTokenAccounts.value.reduce((acc, row) => {
-          const amount = (row.account.data as any)?.parsed?.info?.tokenAmount?.amount;
-          try {
-            return acc + BigInt(String(amount ?? '0'));
-          } catch {
-            return acc;
-          }
-        }, 0n);
-        skrUiAmount = formatRawAmount(totalRaw.toString(), decimals, 6);
-      } else {
-        // Fallback: direct ATA lookup if parsed owner query is unavailable.
-        const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-        const ataBal = await connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null);
-        skrUiAmount = ataBal?.value?.uiAmountString ?? '0';
+      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+      const allRows = [
+        ...(tokenProgramAccounts?.value ?? []),
+        ...(token2022Accounts?.value ?? []),
+        ...(mintScopedAccounts?.value ?? []),
+      ];
+      const seen = new Set<string>();
+      let totalRaw = 0n;
+      for (const row of allRows) {
+        const pubkey = row?.pubkey?.toBase58?.() ?? String(row?.pubkey ?? '');
+        if (!pubkey || seen.has(pubkey)) continue;
+        seen.add(pubkey);
+        const info = (row.account.data as any)?.parsed?.info;
+        if (String(info?.mint ?? '') !== SKR_MINT) continue;
+        try {
+          totalRaw += BigInt(String(info?.tokenAmount?.amount ?? '0'));
+        } catch {
+          // ignore malformed account rows
+        }
       }
 
+      let skrUiAmount = formatRawAmount(totalRaw.toString(), decimals, 6);
+      if (skrUiAmount === '0') {
+        // Final fallback: direct ATA lookup if parsed queries are unavailable.
+        const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+        const ataBal = await connection.getTokenAccountBalance(ownerAta, 'processed').catch(() => null);
+        if (ataBal?.value?.uiAmountString != null) skrUiAmount = ataBal.value.uiAmountString;
+      }
+
+      const lamports = lamportsProcessed ?? lamportsConfirmed ?? 0;
       setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
       setWalletSkrBalance(skrUiAmount);
     } catch {
@@ -724,6 +740,14 @@ export default function App() {
   useEffect(() => {
     // No auto-refresh on app switch; manual swipe-down refresh only.
   }, [isAppActive]);
+
+  useEffect(() => {
+    if (!wallet || !isAppActive) return;
+    const t = setInterval(() => {
+      refreshWalletBalances(wallet).catch(() => {});
+    }, 7000);
+    return () => clearInterval(t);
+  }, [wallet, isAppActive, refreshWalletBalances]);
 
   useEffect(() => {
     if (!isAppActive) return;
@@ -2093,40 +2117,42 @@ export default function App() {
         {showSettings && (
           <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight, { color: palette.text }]}>Settings</Text>
-          <View style={styles.row}>
-            <Text style={styles.meta}>Network: Mainnet</Text>
-            <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
-          </View>
-          <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
-          {showExplorerOptions && (
-            <View style={[styles.dropdownBox, theme === 'light' && styles.dropdownBoxLight]}>
-              <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
-              <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
-              <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
+          <ScrollView style={styles.settingsScroll} contentContainerStyle={styles.settingsScrollContent} showsVerticalScrollIndicator={false}>
+            <View style={styles.row}>
+              <Text style={styles.meta}>Network: Mainnet</Text>
+              <ActionButton label={`Theme: ${theme === 'dark' ? 'Dark' : 'Light'}`} onPress={() => setTheme((t) => t === 'dark' ? 'light' : 'dark')} />
             </View>
-          )}
+            <ActionButton label={`Explorer: ${explorerLabel}`} onPress={() => setShowExplorerOptions((v) => !v)} />
+            {showExplorerOptions && (
+              <View style={[styles.dropdownBox, theme === 'light' && styles.dropdownBoxLight]}>
+                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('orbmarkets'); setShowExplorerOptions(false); }}>OrbMarkets.io</Text>
+                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solscan'); setShowExplorerOptions(false); }}>Solscan.io</Text>
+                <Text style={[styles.dropdownItem, theme === 'light' && styles.dropdownItemLight]} onPress={() => { setExplorer('solana'); setShowExplorerOptions(false); }}>Explorer.Solana.com</Text>
+              </View>
+            )}
 
-          <ActionButton label="What's New" onPress={() => setShowWhatsNew(true)} />
-          <ActionButton
-            label={`Consolidation Mode: ${consolidationSendMode === 'sequential' ? 'Sequential' : 'Batch'}`}
-            onPress={() =>
-              setConsolidationSendMode((m) => (m === 'sequential' ? 'batch' : 'sequential'))
-            }
-          />
-          <ActionButton
-            label={`Batch Chunk: ${batchTxChunkSize} tx`}
-            onPress={() =>
-              setBatchTxChunkSize((n) => (n === 2 ? 3 : n === 3 ? 4 : 2))
-            }
-          />
-          <ActionButton label="Quick Tips" onPress={() => setShowTips(true)} />
-          <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
-          <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
-          <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
-          <ActionButton label="Copy TX Lifecycle Report" onPress={copyTxLifecycleReport} />
-          <ActionButton label="Export Logs (Share)" onPress={exportLogsToShare} />
-          <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
-          <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
+            <ActionButton label="What's New" onPress={() => setShowWhatsNew(true)} />
+            <ActionButton
+              label={`Consolidation Mode: ${consolidationSendMode === 'sequential' ? 'Sequential' : 'Batch'}`}
+              onPress={() =>
+                setConsolidationSendMode((m) => (m === 'sequential' ? 'batch' : 'sequential'))
+              }
+            />
+            <ActionButton
+              label={`Batch Chunk: ${batchTxChunkSize} tx`}
+              onPress={() =>
+                setBatchTxChunkSize((n) => (n === 2 ? 3 : n === 3 ? 4 : 2))
+              }
+            />
+            <ActionButton label="Quick Tips" onPress={() => setShowTips(true)} />
+            <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
+            <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
+            <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
+            <ActionButton label="Copy TX Lifecycle Report" onPress={copyTxLifecycleReport} />
+            <ActionButton label="Export Logs (Share)" onPress={exportLogsToShare} />
+            <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
+            <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
+          </ScrollView>
           <Text style={styles.settingsFooter}>built with ❤️ by rasetsukyo</Text>
 
         </View>
@@ -2367,11 +2393,19 @@ const styles = StyleSheet.create({
     left: 12,
     right: 12,
     bottom: 58,
+    maxHeight: '84%',
     borderWidth: 1,
     borderRadius: 14,
     padding: 12,
     gap: 8,
     zIndex: 20,
+  },
+  settingsScroll: {
+    maxHeight: 430,
+  },
+  settingsScrollContent: {
+    gap: 8,
+    paddingBottom: 2,
   },
   settingsFooter: {
     color: colors.muted,
