@@ -1129,7 +1129,15 @@ export default function App() {
         label: 'Consolidation dry-run',
         note: `eligible=${eligibleSourceKeys.length}, sim=${simPassed}/${txs.length}`,
       });
-      setStatus(`Dry-run complete: ${simPassed}/${txs.length} simulation passed. Report copied.`);
+      if (simFailed > 0) {
+        const firstFailure = failures[0]?.error ?? 'simulation error';
+        setStatus(
+          `Dry-run: eligible ${eligibleSourceKeys.length}, but simulation failed ${simFailed}/${txs.length}. ` +
+          `Top failure: ${firstFailure}. Report copied.`
+        );
+      } else {
+        setStatus(`Dry-run: eligible ${eligibleSourceKeys.length}, simulation passed ${simPassed}/${txs.length}. Report copied.`);
+      }
     } catch (e: any) {
       setStatus(actionError('Dry-run failed', e));
     } finally {
