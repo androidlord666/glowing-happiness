@@ -1891,6 +1891,7 @@ export default function App() {
             <Text style={styles.meta}>• Create stake above rent-exempt minimum (tiny amounts fail by design).</Text>
             <Text style={styles.meta}>• Consolidate to one destination; use batch for large runs, sequential for step-by-step control.</Text>
             <Text style={styles.meta}>• Withdraw only when status is Inactive, then refresh after confirmations.</Text>
+            <Text style={styles.meta}>• Pull down on the app to refresh balances and account states.</Text>
             <ActionButton label="Got it" onPress={() => setShowTips(false)} />
           </View>
         </View>
