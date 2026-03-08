@@ -58,6 +58,7 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 type TxLifecycleStage = 'prepared' | 'sign_requested' | 'submitted' | 'confirmed' | 'failed';
+type ConsolidationBatchChunkSize = 2 | 3 | 4;
 
 type TxLifecycleEvent = {
   at: string;
@@ -84,7 +85,7 @@ const PLATFORM_FEE_PER_SOURCE_SKR = 10;
 const PLATFORM_FEE_CAP_SKR = 100;
 // Solana Mobile Wallet Adapter payload limits vary by wallet/runtime.
 // Keep batch requests small for high reliability; 99-source runs are still supported via chunking.
-const MAX_BATCH_TX_PER_REQUEST = 3;
+const DEFAULT_BATCH_TX_PER_REQUEST: ConsolidationBatchChunkSize = 3;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
 const TX_LIFECYCLE_STORAGE_KEY = '@stakeNbake:txLifecycleEvents:v1';
 
@@ -323,6 +324,7 @@ export default function App() {
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
   const [consolidationSendMode, setConsolidationSendMode] = useState<ConsolidationSendMode>('batch');
+  const [batchTxChunkSize, setBatchTxChunkSize] = useState<ConsolidationBatchChunkSize>(DEFAULT_BATCH_TX_PER_REQUEST);
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
   const pullShift = useRef(new Animated.Value(0)).current;
@@ -1298,7 +1300,7 @@ export default function App() {
         submittedMergeSigs.push(sig);
       };
       if (consolidationSendMode === 'batch') {
-        const batchChunks = chunkArray(mergeTxsToSend, MAX_BATCH_TX_PER_REQUEST);
+        const batchChunks = chunkArray(mergeTxsToSend, batchTxChunkSize);
         let globalIdx = 0;
         for (let c = 0; c < batchChunks.length; c++) {
           const chunkStart = globalIdx;
@@ -1380,7 +1382,7 @@ export default function App() {
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
       const reportedMergeCount = Math.max(0, mergeTxsToSend.length - failedMergeCount);
-      setStatus(`✅ Consolidation submitted (${reportedMergeCount} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
+      setStatus(`✅ Consolidation submitted (${reportedMergeCount} merge tx, mode: ${consolidationSendMode}, chunk ${batchTxChunkSize}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
@@ -1673,6 +1675,7 @@ export default function App() {
       avgRefreshMs,
       status,
       consolidationSendMode,
+      batchTxChunkSize,
       timestamp: new Date().toISOString(),
     };
 
@@ -1697,6 +1700,7 @@ export default function App() {
       },
       status,
       consolidationSendMode,
+      batchTxChunkSize,
       lastSignature,
       recentTxs: txHistory,
       txLifecycleEvents: txLifecycleEvents.slice(0, 50),
@@ -2193,6 +2197,12 @@ export default function App() {
               setConsolidationSendMode((m) => (m === 'sequential' ? 'batch' : 'sequential'))
             }
           />
+          <ActionButton
+            label={`Batch Chunk: ${batchTxChunkSize} tx`}
+            onPress={() =>
+              setBatchTxChunkSize((n) => (n === 2 ? 3 : n === 3 ? 4 : 2))
+            }
+          />
           <ActionButton label="Quick Tips" onPress={() => setShowTips(true)} />
           <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
           <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
@@ -2214,6 +2224,7 @@ export default function App() {
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only)</Text>
             <Text style={styles.meta}>Fee wallet: {shortAddr(PLATFORM_FEE_WALLET)}</Text>
             <Text style={styles.meta}>Mode: {consolidationSendMode === 'sequential' ? 'Sequential' : 'Batch'}</Text>
+            <Text style={styles.meta}>Batch chunk size: {batchTxChunkSize} tx/request</Text>
             <Text style={styles.meta}>Breakdown: fee tx 1 + merge txs {estimatedMergeTxCount}</Text>
             <Text style={styles.meta}>Preflight: eligible {compatibleSelectedCount} · excluded {selectedIncompatibleCount}</Text>
             <Text style={styles.meta}>Reasons: {preflightSummary}</Text>
@@ -2287,6 +2298,7 @@ export default function App() {
             <Text style={styles.label}>Quick Tips</Text>
             <Text style={styles.meta}>• Create stake above rent-exempt minimum (tiny amounts fail by design).</Text>
             <Text style={styles.meta}>• Consolidate to one destination; use batch for large runs, sequential for step-by-step control.</Text>
+            <Text style={styles.meta}>• Batch chunk size is configurable (2/3/4); default 3 is best reliability.</Text>
             <Text style={styles.meta}>• Use Dry Run before signing to get a simulation report and eligibility reasons.</Text>
             <Text style={styles.meta}>• Withdraw only when status is Inactive, then refresh after confirmations.</Text>
             <Text style={styles.meta}>• Pull down on the app to refresh balances and account states.</Text>
