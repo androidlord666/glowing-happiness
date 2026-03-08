@@ -45,7 +45,7 @@ jobs:
           fi
           echo "$UPLOAD_KEYSTORE_BASE64" | base64 --decode > app/upload-keystore.jks
           cat > keystore.properties <<EOF
-          MYAPP_UPLOAD_STORE_FILE=app/upload-keystore.jks
+          MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks
           MYAPP_UPLOAD_STORE_PASSWORD=$UPLOAD_STORE_PASSWORD
           MYAPP_UPLOAD_KEY_ALIAS=$UPLOAD_KEY_ALIAS
           MYAPP_UPLOAD_KEY_PASSWORD=$UPLOAD_KEY_PASSWORD
