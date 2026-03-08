@@ -521,11 +521,15 @@ export default function App() {
   const allFilteredSelected = useMemo(() => {
     if (!filteredSourceStakeAccounts.length) return false;
     const subset = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
-    return subset.every((a) => !!selected[a.pubkey]);
-  }, [filteredSourceStakeAccounts, selected]);
+    const compatible = subset.filter((a) => isMergeStateCompatible(destinationState, a.stakeState));
+    if (!compatible.length) return false;
+    return compatible.every((a) => !!selected[a.pubkey]);
+  }, [filteredSourceStakeAccounts, selected, destinationState]);
 
   const selectAllValidSources = () => {
-    const subset = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
+    const subset = filteredSourceStakeAccounts
+      .slice(0, MAX_SOURCE_ACCOUNTS)
+      .filter((a) => isMergeStateCompatible(destinationState, a.stakeState));
     if (allFilteredSelected) {
       const next = { ...selected };
       for (const a of subset) delete next[a.pubkey];
@@ -1597,10 +1601,17 @@ export default function App() {
               windowSize={7}
               renderItem={({ item: a }) => {
                 const checked = !!selected[a.pubkey];
+                const compatible = isMergeStateCompatible(destinationState, a.stakeState);
                 return (
                   <Text
-                    style={[styles.account, checked && styles.accountSelected, theme === 'light' && styles.accountLight]}
+                    style={[
+                      styles.account,
+                      checked && styles.accountSelected,
+                      !compatible && styles.accountIncompatible,
+                      theme === 'light' && styles.accountLight,
+                    ]}
                     onPress={() => {
+                      if (!compatible) return;
                       const next = { ...selected };
                       if (!checked && selectedCount >= MAX_SOURCE_ACCOUNTS) {
                         setStatus(`Maximum ${MAX_SOURCE_ACCOUNTS} source stake accounts.`);
@@ -1610,7 +1621,7 @@ export default function App() {
                       setSelected(next);
                     }}
                   >
-                    {checked ? '☑' : '☐'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · <Text style={isInactiveState(a.stakeState) ? styles.stateInactive : undefined}>{displayStakeState(a.stakeState)}</Text>
+                    {compatible ? (checked ? '☑' : '☐') : '⛔'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · <Text style={isInactiveState(a.stakeState) ? styles.stateInactive : undefined}>{displayStakeState(a.stakeState)}</Text>{!compatible ? ' · incompatible with destination state' : ''}
                   </Text>
                 );
               }}
@@ -2052,6 +2063,7 @@ const styles = StyleSheet.create({
   account: { color: colors.text, paddingVertical: 6 },
   accountLight: { color: '#072225' },
   accountSelected: { color: colors.primary },
+  accountIncompatible: { color: colors.muted, opacity: 0.65 },
   accountDestination: { color: colors.secondary },
   status: { color: colors.secondary, marginTop: 10 },
   statusMuted: { color: colors.secondary, marginTop: 10, opacity: 0.7 },
