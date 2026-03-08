@@ -71,7 +71,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.49 (code 60)';
+const APP_VERSION_LABEL = 'v2.50 (code 61)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -974,7 +974,10 @@ export default function App() {
   };
 
   const onCreateStake = async () => {
-    if (busy) return;
+    if (busy) {
+      setStatus('Please wait for refresh to finish, then tap Create Stake again.');
+      return;
+    }
     try {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(createStakeSol);

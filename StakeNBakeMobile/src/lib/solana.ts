@@ -22,6 +22,21 @@ export function createConnection(cluster: ClusterName): Connection {
   return new Connection(RPC_URLS[cluster], 'confirmed');
 }
 
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
+}
+
 function isDeactivationStarted(epoch?: string): boolean {
   return !!epoch && epoch !== U64_MAX_EPOCH_STR;
 }
@@ -41,16 +56,20 @@ export async function fetchStakeAccounts(
   const endpointResults = await Promise.allSettled(
     candidateEndpoints.map(async (endpoint) => {
       const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
-      const [asStaker, asWithdrawer] = await Promise.all([
-        conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
-          commitment: 'confirmed',
-          filters: [{ memcmp: { offset: AUTH_STAKER_OFFSET, bytes: ownerKey } }],
-        }),
-        conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
-          commitment: 'confirmed',
-          filters: [{ memcmp: { offset: AUTH_WITHDRAWER_OFFSET, bytes: ownerKey } }],
-        }),
-      ]);
+      const [asStaker, asWithdrawer] = await withTimeout(
+        Promise.all([
+          conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+            commitment: 'confirmed',
+            filters: [{ memcmp: { offset: AUTH_STAKER_OFFSET, bytes: ownerKey } }],
+          }),
+          conn.getParsedProgramAccounts(STAKE_PROGRAM_ID, {
+            commitment: 'confirmed',
+            filters: [{ memcmp: { offset: AUTH_WITHDRAWER_OFFSET, bytes: ownerKey } }],
+          }),
+        ]),
+        6500,
+        `stake fetch ${endpoint}`
+      );
       return { asStaker, asWithdrawer };
     })
   );
