@@ -71,12 +71,13 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.50 (code 61)';
+const APP_VERSION_LABEL = 'v2.51 (code 62)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
 const FEATURE_FEE_ENABLED = true;
 const FEATURE_WITHDRAW_ENABLED = true;
+const LOW_LATENCY_MODE = true;
 
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
@@ -333,7 +334,13 @@ export default function App() {
   const [txLifecycleEvents, setTxLifecycleEvents] = useState<TxLifecycleEvent[]>([]);
   const [walletSolBalance, setWalletSolBalance] = useState<string>('—');
   const [walletSkrBalance, setWalletSkrBalance] = useState<string>('—');
-  const [busy, setBusy] = useState(false);
+  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [connectBusy, setConnectBusy] = useState(false);
+  const [stakeBusy, setStakeBusy] = useState(false);
+  const [unstakeBusy, setUnstakeBusy] = useState(false);
+  const [withdrawBusy, setWithdrawBusy] = useState(false);
+  const [consolidateBusy, setConsolidateBusy] = useState(false);
+  const [sendBusy, setSendBusy] = useState(false);
   const [status, setStatus] = useState('Disconnected');
   const [rpcHealth, setRpcHealth] = useState<RpcHealth>('healthy');
   const [sourceFilter, setSourceFilter] = useState<SourceFilter>('all');
@@ -371,6 +378,7 @@ export default function App() {
     };
 
   const explorerLabel = explorer === 'orbmarkets' ? 'OrbMarkets.io' : explorer === 'solscan' ? 'Solscan.io' : 'Explorer.Solana.com';
+  const anyActionBusy = connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy;
 
   const connection = useMemo(() => createConnection(cluster), [cluster]);
 
@@ -572,7 +580,7 @@ export default function App() {
   }, [selectedCompatibility]);
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate =
-    !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS && compatibleSelectedCount > 0;
+    !consolidateBusy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS && compatibleSelectedCount > 0;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
   const withdrawReadyAccounts = useMemo(
     () =>
@@ -588,7 +596,7 @@ export default function App() {
         : withdrawReadyAccounts[0]?.pubkey ?? '',
     [destination, destinationState, withdrawReadyAccounts, stakeAccounts]
   );
-  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !busy && !!withdrawTarget;
+  const canWithdraw = FEATURE_WITHDRAW_ENABLED && !withdrawBusy && !!withdrawTarget;
   const consolidationFeeSkr = FEATURE_FEE_ENABLED
     ? Math.min(selectedCount * PLATFORM_FEE_PER_SOURCE_SKR, PLATFORM_FEE_CAP_SKR)
     : 0;
@@ -848,9 +856,9 @@ export default function App() {
   }, [pendingTxs, connection, isAppActive, pushTxEvent, refreshWalletBalances, rememberTx]);
 
   const connectWallet = async () => {
-    if (busy) return;
+    if (connectBusy) return;
     try {
-      setBusy(true);
+      setConnectBusy(true);
       const session = await walletAdapter.connect(cluster);
       setWallet(session.address);
       setScreen('app');
@@ -862,7 +870,7 @@ export default function App() {
     } catch (e: any) {
       setStatus(actionError('Connect error', e));
     } finally {
-      setBusy(false);
+      setConnectBusy(false);
     }
   };
 
@@ -920,7 +928,7 @@ export default function App() {
 
       lastRefreshAtRef.current = now;
       refreshInProgressRef.current = true;
-      if (!opts?.skipBusy) setBusy(true);
+      if (!opts?.skipBusy) setRefreshBusy(true);
       setStatus('Refreshing stake accounts...');
       const startedAt = Date.now();
 
@@ -969,15 +977,12 @@ export default function App() {
       }
     } finally {
       refreshInProgressRef.current = false;
-      if (!opts?.skipBusy) setBusy(false);
+      if (!opts?.skipBusy) setRefreshBusy(false);
     }
   };
 
   const onCreateStake = async () => {
-    if (busy) {
-      setStatus('Please wait for refresh to finish, then tap Create Stake again.');
-      return;
-    }
+    if (stakeBusy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(createStakeSol);
@@ -994,7 +999,7 @@ export default function App() {
         throw new Error('Insufficient balance for staking amount');
       }
 
-      setBusy(true);
+      setStakeBusy(true);
       setStatus('Creating and delegating stake account...');
 
       const seed = `snb-${Date.now()}`;
@@ -1011,12 +1016,14 @@ export default function App() {
       if (!sig) throw new Error('wallet returned empty signature');
       rememberTx(sig);
       trackPendingTx(sig, 'Stake transaction');
-      setStatus(`🛰️ Stake transaction submitted. Confirming...`);
-      await connection.confirmTransaction(sig, 'confirmed');
+      setStatus('🛰️ Stake transaction submitted.');
+      if (!LOW_LATENCY_MODE) {
+        await connection.confirmTransaction(sig, 'confirmed');
+      }
       setDestination(stakeAddress);
       await refreshWalletBalances(wallet);
-      await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
-      setStatus(`✅ Delegated ${createStakeSol} SOL to validator ${shortAddr(validatorVote)}. Swipe down from top to sync new stake account state.`);
+      loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+      setStatus(`✅ Stake submitted (${shortAddr(sig)}). Background confirmation in progress.`);
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
       if (classifyError(e) === 'user') {
@@ -1025,16 +1032,16 @@ export default function App() {
         setStatus(`Create stake not submitted: ${normalizeErrorMessage(e)}`);
       }
     } finally {
-      setBusy(false);
+      setStakeBusy(false);
     }
   };
 
   const onUnstake = async () => {
-    if (busy) return;
+    if (unstakeBusy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select a stake account first');
-      setBusy(true);
+      setUnstakeBusy(true);
       setStatus('Submitting unstake (deactivate) transaction...');
 
       const tx = await buildDeactivateStakeTx({
@@ -1046,8 +1053,10 @@ export default function App() {
       if (sigs[0]) {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Unstake transaction');
-        setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}. Confirming...`);
-        await connection.confirmTransaction(sigs[0], 'confirmed');
+        setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}.`);
+        if (!LOW_LATENCY_MODE) {
+          await connection.confirmTransaction(sigs[0], 'confirmed');
+        }
         let nextHint = 'Waiting for deactivation/epoch processing before withdraw.';
         try {
           const [activation, epochInfo] = await Promise.all([
@@ -1065,25 +1074,25 @@ export default function App() {
           // keep default hint
         }
         await refreshWalletBalances(wallet);
-        await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
-        setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint} Swipe down from top to update list.`);
+        loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+        setStatus(`✅ Unstake submitted for ${shortAddr(destination)}. ${nextHint}`);
       }
     } catch (e: any) {
       setStatus(actionError('Unstake error', e));
     } finally {
-      setBusy(false);
+      setUnstakeBusy(false);
     }
   };
 
   const onWithdraw = async () => {
-    if (busy) return;
+    if (withdrawBusy) return;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!withdrawTarget) throw new Error('No withdraw-ready stake account detected yet. Refresh and try again.');
       const target = withdrawTarget;
       if (target !== destination) setDestination(target);
 
-      setBusy(true);
+      setWithdrawBusy(true);
       setStatus('Checking stake account withdraw eligibility...');
 
       const stakePubkey = asPublicKey(target);
@@ -1119,8 +1128,10 @@ export default function App() {
       if (sigs[0]) {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Withdraw transaction');
-        setStatus(`💸 Withdraw submitted for ${shortAddr(target)}. Confirming...`);
-        await connection.confirmTransaction(sigs[0], 'confirmed');
+        setStatus(`💸 Withdraw submitted for ${shortAddr(target)}.`);
+        if (!LOW_LATENCY_MODE) {
+          await connection.confirmTransaction(sigs[0], 'confirmed');
+        }
         // Optimistically remove closed account from list to avoid dust-withdraw confusion.
         setStakeAccounts((prev) => prev.filter((a) => a.pubkey !== target));
         setSelected((prev) => {
@@ -1131,19 +1142,19 @@ export default function App() {
         });
         if (destination === target) setDestination('');
         await refreshWalletBalances(wallet);
-        await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
-        setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}.`);
+        loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+        setStatus(`✅ Withdraw submitted to wallet ${shortAddr(wallet)}.`);
       }
     } catch {
       suppressNextStatusModalRef.current = true;
       setStatus('Withdraw not submitted. Check account state and try again.');
     } finally {
-      setBusy(false);
+      setWithdrawBusy(false);
     }
   };
 
   const onConsolidate = async () => {
-    if (busy || consolidationInFlightRef.current) {
+    if (consolidateBusy || consolidationInFlightRef.current) {
       setStatus('Consolidation already in progress.');
       return;
     }
@@ -1192,7 +1203,7 @@ export default function App() {
       }
       consolidationIdempotencyRef.current[sessionKey] = now;
       consolidationInFlightRef.current = true;
-      setBusy(true);
+      setConsolidateBusy(true);
       pushTxEvent({
         stage: 'prepared',
         label: 'Consolidation preflight',
@@ -1268,8 +1279,10 @@ export default function App() {
         trackPendingTx(sig, 'Destination delegate transaction');
         anySubmitted = true;
         pushTxEvent({ stage: 'submitted', label: 'Destination delegate transaction', sig, sessionKey });
-        await connection.confirmTransaction(sig, 'confirmed');
-        pushTxEvent({ stage: 'confirmed', label: 'Destination delegate transaction', sig, sessionKey });
+        if (!LOW_LATENCY_MODE) {
+          await connection.confirmTransaction(sig, 'confirmed');
+          pushTxEvent({ stage: 'confirmed', label: 'Destination delegate transaction', sig, sessionKey });
+        }
       }
 
       const submittedMergeSigs: string[] = [];
@@ -1317,8 +1330,10 @@ export default function App() {
         trackPendingTx(sig, label);
         anySubmitted = true;
         pushTxEvent({ stage: 'submitted', label, sig, sessionKey });
-        await connection.confirmTransaction(sig, 'confirmed');
-        pushTxEvent({ stage: 'confirmed', label, sig, sessionKey });
+        if (!LOW_LATENCY_MODE) {
+          await connection.confirmTransaction(sig, 'confirmed');
+          pushTxEvent({ stage: 'confirmed', label, sig, sessionKey });
+        }
         submittedMergeSigs.push(sig);
       };
       if (consolidationSendMode === 'batch') {
@@ -1370,16 +1385,18 @@ export default function App() {
           }
           globalIdx += chunkLen;
         }
-        await Promise.all(
-          submittedMergeSigs.map(async (sig) => {
-            try {
-              await connection.confirmTransaction(sig, 'confirmed');
-              pushTxEvent({ stage: 'confirmed', label: 'Consolidation tx', sig, sessionKey });
-            } catch {
-              // confirmation can lag; submitted signatures still prove signing success
-            }
-          })
-        );
+        if (!LOW_LATENCY_MODE) {
+          await Promise.all(
+            submittedMergeSigs.map(async (sig) => {
+              try {
+                await connection.confirmTransaction(sig, 'confirmed');
+                pushTxEvent({ stage: 'confirmed', label: 'Consolidation tx', sig, sessionKey });
+              } catch {
+                // confirmation can lag; submitted signatures still prove signing success
+              }
+            })
+          );
+        }
       } else {
         for (let i = 0; i < mergeTxsToSend.length; i++) {
           try {
@@ -1404,8 +1421,8 @@ export default function App() {
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
       const reportedMergeCount = Math.max(0, mergeTxsToSend.length - failedMergeCount);
-      setStatus(`✅ Consolidation submitted (${reportedMergeCount} merge tx, mode: ${consolidationSendMode}, chunk ${batchTxChunkSize}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
-      await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
+      setStatus(`✅ Consolidation submitted (${reportedMergeCount} merge tx, mode: ${consolidationSendMode}, chunk ${batchTxChunkSize}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing in background...`);
+      loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
       pushTxEvent({
@@ -1417,7 +1434,7 @@ export default function App() {
       setStatus('Consolidation not submitted. Please try again.');
     } finally {
       consolidationInFlightRef.current = false;
-      setBusy(false);
+      setConsolidateBusy(false);
       // Prevent stale incompatible selections from poisoning the next run.
       setSelected({});
       if (sessionKey && !anySubmitted) {
@@ -1640,7 +1657,7 @@ export default function App() {
   }, [mode, isAppActive, swapAmount, swapBusy, fetchSwapQuote]);
 
   const onSend = async () => {
-    if (busy) return;
+    if (sendBusy) return;
     try {
       if (!wallet) throw new Error('Connect wallet first');
       if (!sendTo.trim()) throw new Error('Enter recipient address or .sol name');
@@ -1650,7 +1667,7 @@ export default function App() {
       const lamports = Math.round(Number(sendSol) * LAMPORTS_PER_SOL);
       if (!Number.isFinite(lamports) || lamports <= 0) throw new Error('Invalid SOL amount');
 
-      setBusy(true);
+      setSendBusy(true);
       setStatus('Building transfer transaction...');
       const tx = await buildTransferTx({
         connection,
@@ -1663,14 +1680,16 @@ export default function App() {
       if (sigs[0]) {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Transfer transaction');
-        setStatus(`🛰️ Transfer submitted. Confirming...`);
-        await connection.confirmTransaction(sigs[0], 'confirmed');
-        setStatus(`✅ Sent ${sendSol} SOL to ${shortAddr(recipient)}.`);
+        setStatus('🛰️ Transfer submitted.');
+        if (!LOW_LATENCY_MODE) {
+          await connection.confirmTransaction(sigs[0], 'confirmed');
+        }
+        setStatus(`✅ Transfer submitted to ${shortAddr(recipient)}.`);
       }
     } catch (e: any) {
       setStatus(actionError('Send error', e));
     } finally {
-      setBusy(false);
+      setSendBusy(false);
     }
   };
 
@@ -1836,7 +1855,7 @@ export default function App() {
             <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
             <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
             <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
-            <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
+            <ActionButton label={connectBusy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
           </Animated.View>
         </SafeAreaView>
       </SafeAreaProvider>
@@ -1921,25 +1940,25 @@ export default function App() {
             <View style={styles.stakeActionRow}>
               <View style={styles.stakeActionCell}>
                 <ActionButton
-                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Staking…' : 'Create Stake'}
+                  label={pullRefreshing ? 'Refreshing…' : stakeBusy ? 'Staking…' : 'Create Stake'}
                   onPress={onCreateStake}
-                  disabled={pullRefreshing}
+                  disabled={pullRefreshing || stakeBusy}
                   fullWidth
                 />
               </View>
               <View style={styles.stakeActionCell}>
                 <ActionButton
-                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Unstaking…' : 'Unstake'}
+                  label={pullRefreshing ? 'Refreshing…' : unstakeBusy ? 'Unstaking…' : 'Unstake'}
                   onPress={onUnstake}
-                  disabled={pullRefreshing}
+                  disabled={pullRefreshing || unstakeBusy}
                   fullWidth
                 />
               </View>
               <View style={styles.stakeActionCell}>
                 <ActionButton
-                  label={pullRefreshing ? 'Refreshing…' : busy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
+                  label={pullRefreshing ? 'Refreshing…' : withdrawBusy ? 'Withdrawing…' : canWithdraw ? 'Withdraw' : 'Withdraw (not available in current state)'}
                   onPress={onWithdraw}
-                  disabled={!canWithdraw || pullRefreshing}
+                  disabled={!canWithdraw || pullRefreshing || withdrawBusy}
                   fullWidth
                 />
               </View>
@@ -1987,9 +2006,9 @@ export default function App() {
 
             <View style={styles.row}>
               <ActionButton
-                label={pullRefreshing ? 'Refreshing…' : busy ? 'Consolidating…' : 'Consolidate'}
+                label={pullRefreshing ? 'Refreshing…' : consolidateBusy ? 'Consolidating…' : 'Consolidate'}
                 onPress={() => setConfirmConsolidate(true)}
-                disabled={!canConsolidate || pullRefreshing}
+                disabled={!canConsolidate || pullRefreshing || consolidateBusy}
               />
             </View>
 
@@ -2000,7 +2019,7 @@ export default function App() {
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only · supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
               <ActionButton label={pullRefreshing ? 'Refreshing…' : `Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'high' ? 'low' : f === 'low' ? 'all' : 'high')} disabled={pullRefreshing} />
-              <ActionButton label={pullRefreshing ? 'Refreshing…' : (allFilteredSelected ? 'Deselect all' : 'Select all')} onPress={selectAllValidSources} disabled={busy || pullRefreshing || filteredSourceStakeAccounts.length === 0} />
+              <ActionButton label={pullRefreshing ? 'Refreshing…' : (allFilteredSelected ? 'Deselect all' : 'Select all')} onPress={selectAllValidSources} disabled={anyActionBusy || pullRefreshing || filteredSourceStakeAccounts.length === 0} />
             </View>
             {filteredSourceStakeAccounts.length === 0 && (
               <Text style={styles.meta}>No source accounts available yet. You need at least two stake accounts to consolidate.</Text>
@@ -2073,10 +2092,10 @@ export default function App() {
             />
             <View style={styles.equalBtnRow}>
               <View style={styles.equalBtnCell}>
-                <ActionButton label="Max" onPress={onSendMax} disabled={busy} />
+                <ActionButton label="Max" onPress={onSendMax} disabled={sendBusy} />
               </View>
               <View style={styles.equalBtnCell}>
-                <ActionButton label={busy ? 'Sending…' : 'Send'} onPress={onSend} />
+                <ActionButton label={sendBusy ? 'Sending…' : 'Send'} onPress={onSend} disabled={sendBusy} />
               </View>
             </View>
           </Animated.View>
@@ -2279,12 +2298,12 @@ export default function App() {
             <View style={styles.row}>
               <ActionButton label="Cancel" onPress={() => setConfirmConsolidate(false)} />
               <ActionButton
-                label={busy ? 'Consolidating…' : 'Yes, consolidate'}
+                label={consolidateBusy ? 'Consolidating…' : 'Yes, consolidate'}
                 onPress={async () => {
                   setConfirmConsolidate(false);
                   await onConsolidate();
                 }}
-                disabled={busy}
+                disabled={consolidateBusy}
               />
             </View>
           </View>
