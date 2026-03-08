@@ -1041,13 +1041,8 @@ export default function App() {
           setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${txIndexes.length} tx)...`);
           for (const txIndex of txIndexes) {
             try {
-              const tx = await buildPreparedMergeTx(txIndex);
-              const sigs = await walletAdapter.signAndSendTransactions([tx]);
-              const sig = sigs[0];
-              if (!sig) throw new Error('wallet returned empty signature');
-              rememberTx(sig);
-              trackPendingTx(sig, `Consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}`);
-              submittedMergeSigs.push(sig);
+              // Use the same proven send+confirm path as sequential mode for reliability.
+              await submitSingleMergeTx(txIndex);
             } catch (e: any) {
               if (classifyError(e) === 'user') throw e;
               failedMergeCount += 1;
