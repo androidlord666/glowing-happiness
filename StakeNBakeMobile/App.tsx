@@ -594,19 +594,36 @@ export default function App() {
     try {
       const owner = asPublicKey(active);
       const mint = asPublicKey(SKR_MINT);
-      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-
-      const [lamports, skrBal] = await Promise.all([
+      const [lamports, parsedTokenAccounts] = await Promise.all([
         connection.getBalance(owner, 'confirmed'),
-        connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null),
+        connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed').catch(() => null),
       ]);
 
+      let skrUiAmount = '0';
+      if (parsedTokenAccounts?.value?.length) {
+        const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+        const totalRaw = parsedTokenAccounts.value.reduce((acc, row) => {
+          const amount = (row.account.data as any)?.parsed?.info?.tokenAmount?.amount;
+          try {
+            return acc + BigInt(String(amount ?? '0'));
+          } catch {
+            return acc;
+          }
+        }, 0n);
+        skrUiAmount = formatRawAmount(totalRaw.toString(), decimals, 6);
+      } else {
+        // Fallback: direct ATA lookup if parsed owner query is unavailable.
+        const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+        const ataBal = await connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null);
+        skrUiAmount = ataBal?.value?.uiAmountString ?? '0';
+      }
+
       setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
-      setWalletSkrBalance(skrBal?.value?.uiAmountString ?? '0');
+      setWalletSkrBalance(skrUiAmount);
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
     }
-  }, [connection, wallet]);
+  }, [connection, wallet, skrDecimals]);
 
   const onPullRefresh = async () => {
     if (!wallet) return;
