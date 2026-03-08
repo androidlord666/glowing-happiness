@@ -1057,16 +1057,14 @@ export default function App() {
         tx.lastValidBlockHeight = recent.lastValidBlockHeight;
         tx.feePayer = owner;
         if (feeBundle) {
-          if (txIndex === 0) {
-            tx.add(
-              createAssociatedTokenAccountIdempotentInstruction(
-                owner,
-                feeBundle.feeAta,
-                asPublicKey(PLATFORM_FEE_WALLET),
-                feeBundle.mint
-              )
-            );
-          }
+          tx.add(
+            createAssociatedTokenAccountIdempotentInstruction(
+              owner,
+              feeBundle.feeAta,
+              asPublicKey(PLATFORM_FEE_WALLET),
+              feeBundle.mint
+            )
+          );
           const raw = feeBundle.perTxRaw[txIndex] ?? 0n;
           if (raw > 0n) {
             tx.add(createTransferInstruction(feeBundle.ownerAta, feeBundle.feeAta, owner, raw));
