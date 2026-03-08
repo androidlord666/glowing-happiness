@@ -238,6 +238,39 @@ function deriveDelegationStateFromInfo(info: StakeAccountInfo, currentEpoch?: bi
   return 'active';
 }
 
+async function hydrateStakeStatesFromChain(
+  connection: ReturnType<typeof createConnection>,
+  accounts: StakeAccountInfo[]
+): Promise<StakeAccountInfo[]> {
+  if (!accounts.length) return accounts;
+  const chunks = chunkArray(accounts, 8);
+  const byPubkey = new Map<string, string>();
+
+  for (const chunk of chunks) {
+    await Promise.all(
+      chunk.map(async (account) => {
+        try {
+          const activation = await connection.getStakeActivation(asPublicKey(account.pubkey), 'confirmed');
+          if (activation?.state) {
+            byPubkey.set(account.pubkey, activation.state);
+          }
+        } catch {
+          // Keep parsed fallback if stake activation lookup fails.
+        }
+      })
+    );
+  }
+
+  return accounts.map((account) => {
+    const stakeType = String(account.stakeType ?? '').toLowerCase();
+    if (stakeType === 'initialized' || stakeType === 'uninitialized') {
+      return { ...account, stakeState: 'undelegated' };
+    }
+    const chainState = byPubkey.get(account.pubkey);
+    return chainState ? { ...account, stakeState: chainState } : account;
+  });
+}
+
 export default function App() {
   const [screen, setScreen] = useState<Screen>('splash');
   const [splashPhase, setSplashPhase] = useState<0 | 1>(0);
@@ -772,10 +805,11 @@ export default function App() {
 
       const epochInfo = await connection.getEpochInfo('confirmed').catch(() => null);
       const currentEpoch = epochInfo?.epoch !== undefined ? BigInt(epochInfo.epoch) : undefined;
-      const resolved = items.map((a) => ({
+      const resolvedFromParsed = items.map((a) => ({
         ...a,
         stakeState: deriveDelegationStateFromInfo(a, currentEpoch) ?? 'unknown',
       }));
+      const resolved = await hydrateStakeStatesFromChain(connection, resolvedFromParsed);
 
       lastStakeAccountsRef.current = resolved;
       setRpcHealth('healthy');
@@ -859,6 +893,7 @@ export default function App() {
       await connection.confirmTransaction(sig, 'confirmed');
       setDestination(stakeAddress);
       await refreshWalletBalances(wallet);
+      await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
       setStatus(`✅ Delegated ${createStakeSol} SOL to validator ${shortAddr(validatorVote)}. Swipe down from top to sync new stake account state.`);
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
@@ -908,6 +943,7 @@ export default function App() {
           // keep default hint
         }
         await refreshWalletBalances(wallet);
+        await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
         setStatus(`✅ Unstake confirmed for ${shortAddr(destination)}. ${nextHint} Swipe down from top to update list.`);
       }
     } catch (e: any) {
