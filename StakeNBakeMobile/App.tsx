@@ -1219,14 +1219,33 @@ export default function App() {
         trackPendingTx(sigs[0], 'Swap transaction');
         setStatus('✅ Swap submitted. Confirming...');
         await connection.confirmTransaction(sigs[0], 'confirmed');
+
         const owner = asPublicKey(wallet);
         const ownerAta = getAssociatedTokenAddressSync(asPublicKey(SKR_MINT), owner);
-        const [solLamports, skrBal] = await Promise.all([
-          connection.getBalance(owner, 'confirmed'),
-          connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null),
-        ]);
-        const afterSol = solLamports / LAMPORTS_PER_SOL;
-        const afterSkr = Number(skrBal?.value?.uiAmountString ?? '0');
+        let afterSol = beforeSol;
+        let afterSkr = beforeSkr;
+        const epsilon = 0.000001;
+        // Poll briefly so post-swap balances update quickly even when RPC indexers lag.
+        for (let attempt = 0; attempt < 6; attempt++) {
+          const commitment = attempt < 2 ? 'processed' : 'confirmed';
+          const [solLamports, skrBal] = await Promise.all([
+            connection.getBalance(owner, commitment as any),
+            connection.getTokenAccountBalance(ownerAta, commitment as any).catch(() => null),
+          ]);
+          afterSol = solLamports / LAMPORTS_PER_SOL;
+          afterSkr = Number(skrBal?.value?.uiAmountString ?? '0');
+          setWalletSolBalance(afterSol.toFixed(4));
+          setWalletSkrBalance(Number.isFinite(afterSkr) ? String(afterSkr) : '0');
+
+          if (Math.abs(afterSol - beforeSol) > epsilon || Math.abs(afterSkr - beforeSkr) > epsilon) {
+            break;
+          }
+
+          await new Promise<void>((resolve) => setTimeout(resolve, 450 + attempt * 220));
+        }
+        // Final confirmed sync for consistency.
+        await refreshWalletBalances(wallet);
+
         setWalletSolBalance(afterSol.toFixed(4));
         setWalletSkrBalance(Number.isFinite(afterSkr) ? String(afterSkr) : '0');
         const dSol = Number.isFinite(beforeSol) ? (afterSol - beforeSol).toFixed(4) : 'n/a';
