@@ -64,6 +64,11 @@ jobs:
       - name: Build release APK
         run: ./gradlew clean :app:assembleRelease --no-daemon
 
+      - name: Verify JS bundle embedded
+        run: |
+          test -f app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle
+          ls -lh app/build/generated/assets/createBundleReleaseJsAndAssets/index.android.bundle
+
       - name: Generate release changelog
         working-directory: .
         run: |
