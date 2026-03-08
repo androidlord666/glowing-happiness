@@ -154,9 +154,11 @@ function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccount
   // Avoid sending borderline/unknown state pairs that usually fail simulation.
   if (destState === 'syncing' || sourceState === 'syncing') return false;
 
-  // Consolidation supports delegated stake merges. Initialized/undelegated stake
-  // accounts are excluded from merge candidates for reliability.
-  if (destType !== 'delegated' || sourceType !== 'delegated') return false;
+  // Consolidation supports delegated stake merges. Some RPC responses may omit
+  // stakeType, so fall back to state-based inference for delegated/deactivating flows.
+  const destDelegatedLike = destType === 'delegated' || destType === 'stake' || (!destType && isDelegatedState(destState));
+  const sourceDelegatedLike = sourceType === 'delegated' || sourceType === 'stake' || (!sourceType && isDelegatedState(sourceState));
+  if (!destDelegatedLike || !sourceDelegatedLike) return false;
 
   // If either side is inactive, both must be inactive delegated stake.
   if (destState === 'inactive' || sourceState === 'inactive') {
