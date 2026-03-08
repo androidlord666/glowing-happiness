@@ -163,6 +163,14 @@ function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccount
     if (destState !== 'inactive' || sourceState !== 'inactive') return false;
   }
 
+  // Keep warmup and cooldown phases separated; this pair is unstable for merge simulation.
+  if (
+    (destState === 'activating' && sourceState === 'deactivating') ||
+    (destState === 'deactivating' && sourceState === 'activating')
+  ) {
+    return false;
+  }
+
   // Delegate/voter must match for a merge to be accepted.
   if (!destVote || !sourceVote || destVote !== sourceVote) return false;
 
