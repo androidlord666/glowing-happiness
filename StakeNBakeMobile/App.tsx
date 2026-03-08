@@ -899,6 +899,10 @@ export default function App() {
           ]);
           if (activation?.state) {
             nextHint = `State: ${activation.state} (epoch ${epochInfo.epoch}). Withdraw enables when inactive.`;
+            // Apply immediate local state hint so UI doesn't appear stuck on stale activating.
+            setStakeAccounts((prev) =>
+              prev.map((a) => (a.pubkey === destination ? { ...a, stakeState: activation.state } : a))
+            );
           }
         } catch {
           // keep default hint
