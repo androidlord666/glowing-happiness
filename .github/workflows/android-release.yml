@@ -32,6 +32,25 @@ jobs:
         working-directory: StakeNBakeMobile
         run: npm install
 
+      - name: Prepare release signing files
+        env:
+          UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
+          UPLOAD_STORE_PASSWORD: ${{ secrets.UPLOAD_STORE_PASSWORD }}
+          UPLOAD_KEY_ALIAS: ${{ secrets.UPLOAD_KEY_ALIAS }}
+          UPLOAD_KEY_PASSWORD: ${{ secrets.UPLOAD_KEY_PASSWORD }}
+        run: |
+          if [ -z "$UPLOAD_KEYSTORE_BASE64" ] || [ -z "$UPLOAD_STORE_PASSWORD" ] || [ -z "$UPLOAD_KEY_ALIAS" ] || [ -z "$UPLOAD_KEY_PASSWORD" ]; then
+            echo "Missing one or more signing secrets."
+            exit 1
+          fi
+          echo "$UPLOAD_KEYSTORE_BASE64" | base64 --decode > app/upload-keystore.jks
+          cat > keystore.properties <<EOF
+          MYAPP_UPLOAD_STORE_FILE=app/upload-keystore.jks
+          MYAPP_UPLOAD_STORE_PASSWORD=$UPLOAD_STORE_PASSWORD
+          MYAPP_UPLOAD_KEY_ALIAS=$UPLOAD_KEY_ALIAS
+          MYAPP_UPLOAD_KEY_PASSWORD=$UPLOAD_KEY_PASSWORD
+          EOF
+
       - name: Build release APK
         run: ./gradlew clean :app:assembleRelease --no-daemon
 
