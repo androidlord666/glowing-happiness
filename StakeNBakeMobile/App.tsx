@@ -965,52 +965,91 @@ export default function App() {
 
       const submittedMergeSigs: string[] = [];
       let failedMergeCount = 0;
+      const cloneTransaction = (tx: Transaction): Transaction =>
+        Transaction.from(
+          tx.serialize({
+            requireAllSignatures: false,
+            verifySignatures: false,
+          })
+        );
+      const buildPreparedMergeTx = async (txIndex: number): Promise<Transaction> => {
+        const baseTx = mergeTxsToSend[txIndex];
+        const tx = cloneTransaction(baseTx);
+        const recent = await connection.getLatestBlockhash('confirmed');
+        tx.recentBlockhash = recent.blockhash;
+        tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+        tx.feePayer = owner;
+        if (feeBundle) {
+          if (txIndex === 0) {
+            tx.add(
+              createAssociatedTokenAccountIdempotentInstruction(
+                owner,
+                feeBundle.feeAta,
+                asPublicKey(PLATFORM_FEE_WALLET),
+                feeBundle.mint
+              )
+            );
+          }
+          const raw = feeBundle.perTxRaw[txIndex] ?? 0n;
+          if (raw > 0n) {
+            tx.add(createTransferInstruction(feeBundle.ownerAta, feeBundle.feeAta, owner, raw));
+          }
+        }
+        return tx;
+      };
+      const submitSingleMergeTx = async (txIndex: number) => {
+        const tx = await buildPreparedMergeTx(txIndex);
+        setStatus(`Submitting consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}...`);
+        const sigs = await walletAdapter.signAndSendTransactions([tx]);
+        const sig = sigs[0];
+        if (!sig) throw new Error('wallet returned empty signature');
+        rememberTx(sig);
+        trackPendingTx(sig, `Consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}`);
+        await connection.confirmTransaction(sig, 'confirmed');
+        submittedMergeSigs.push(sig);
+      };
       if (consolidationSendMode === 'batch') {
         const batchChunks = chunkArray(mergeTxsToSend, MAX_BATCH_TX_PER_REQUEST);
         let globalIdx = 0;
         for (let c = 0; c < batchChunks.length; c++) {
-          const txChunk = batchChunks[c];
-          const preparedChunk = await Promise.all(
-            txChunk.map(async (tx, idxInChunk) => {
-              const recent = await connection.getLatestBlockhash('confirmed');
-              tx.recentBlockhash = recent.blockhash;
-              tx.lastValidBlockHeight = recent.lastValidBlockHeight;
-              tx.feePayer = owner;
-              const txIndex = globalIdx + idxInChunk;
-              if (feeBundle) {
-                if (txIndex === 0) {
-                  tx.add(
-                    createAssociatedTokenAccountIdempotentInstruction(
-                      owner,
-                      feeBundle.feeAta,
-                      asPublicKey(PLATFORM_FEE_WALLET),
-                      feeBundle.mint
-                    )
-                  );
+          const chunkStart = globalIdx;
+          const chunkLen = batchChunks[c].length;
+          const txIndexes = Array.from({ length: chunkLen }, (_, i) => chunkStart + i);
+          try {
+            const preparedChunk = await Promise.all(txIndexes.map((idx) => buildPreparedMergeTx(idx)));
+            setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${preparedChunk.length} tx)...`);
+            const sigs = await walletAdapter.signAndSendTransactions(preparedChunk);
+            for (let i = 0; i < preparedChunk.length; i++) {
+              const sig = sigs[i];
+              const index = txIndexes[i] + 1;
+              if (!sig) {
+                // Some wallets may return fewer signatures than submitted txs.
+                // Retry missing entries one-by-one to avoid false failures.
+                try {
+                  await submitSingleMergeTx(txIndexes[i]);
+                } catch (e: any) {
+                  if (classifyError(e) === 'user') throw e;
+                  failedMergeCount += 1;
                 }
-                const raw = feeBundle.perTxRaw[txIndex] ?? 0n;
-                if (raw > 0n) {
-                  tx.add(createTransferInstruction(feeBundle.ownerAta, feeBundle.feeAta, owner, raw));
-                }
+                continue;
               }
-              return tx;
-            })
-          );
-
-          setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${preparedChunk.length} tx)...`);
-          const sigs = await walletAdapter.signAndSendTransactions(preparedChunk);
-          for (let i = 0; i < preparedChunk.length; i++) {
-            const sig = sigs[i];
-            const index = globalIdx + i + 1;
-            if (!sig) {
-              failedMergeCount += 1;
-              continue;
+              rememberTx(sig);
+              trackPendingTx(sig, `Consolidation tx ${index}/${mergeTxsToSend.length}`);
+              submittedMergeSigs.push(sig);
             }
-            rememberTx(sig);
-            trackPendingTx(sig, `Consolidation tx ${index}/${mergeTxsToSend.length}`);
-            submittedMergeSigs.push(sig);
+          } catch (e: any) {
+            if (classifyError(e) === 'user') throw e;
+            setStatus(`Batch ${c + 1}/${batchChunks.length} failed; retrying sequentially for this chunk...`);
+            for (const txIndex of txIndexes) {
+              try {
+                await submitSingleMergeTx(txIndex);
+              } catch (singleErr: any) {
+                if (classifyError(singleErr) === 'user') throw singleErr;
+                failedMergeCount += 1;
+              }
+            }
           }
-          globalIdx += preparedChunk.length;
+          globalIdx += chunkLen;
         }
         await Promise.all(
           submittedMergeSigs.map(async (sig) => {
@@ -1023,37 +1062,8 @@ export default function App() {
         );
       } else {
         for (let i = 0; i < mergeTxsToSend.length; i++) {
-          const tx = mergeTxsToSend[i];
           try {
-            const recent = await connection.getLatestBlockhash('confirmed');
-            tx.recentBlockhash = recent.blockhash;
-            tx.lastValidBlockHeight = recent.lastValidBlockHeight;
-            tx.feePayer = owner;
-            if (feeBundle) {
-              if (i === 0) {
-                tx.add(
-                  createAssociatedTokenAccountIdempotentInstruction(
-                    owner,
-                    feeBundle.feeAta,
-                    asPublicKey(PLATFORM_FEE_WALLET),
-                    feeBundle.mint
-                  )
-                );
-              }
-              const raw = feeBundle.perTxRaw[i] ?? 0n;
-              if (raw > 0n) {
-                tx.add(createTransferInstruction(feeBundle.ownerAta, feeBundle.feeAta, owner, raw));
-              }
-            }
-
-            setStatus(`Submitting consolidation tx ${i + 1}/${mergeTxsToSend.length}...`);
-            const sigs = await walletAdapter.signAndSendTransactions([tx]);
-            const sig = sigs[0];
-            if (!sig) throw new Error('wallet returned empty signature');
-            rememberTx(sig);
-            trackPendingTx(sig, `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`);
-            await connection.confirmTransaction(sig, 'confirmed');
-            submittedMergeSigs.push(sig);
+            await submitSingleMergeTx(i);
           } catch (e: any) {
             if (classifyError(e) === 'user') throw e;
             failedMergeCount += 1;
