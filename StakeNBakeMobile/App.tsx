@@ -763,17 +763,22 @@ export default function App() {
       });
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      if (sigs[0]) {
-        rememberTx(sigs[0]);
-        trackPendingTx(sigs[0], 'Stake transaction');
-        setStatus(`🛰️ Stake transaction submitted. Confirming...`);
-        await connection.confirmTransaction(sigs[0], 'confirmed');
-      }
+      const sig = sigs[0];
+      if (!sig) throw new Error('wallet returned empty signature');
+      rememberTx(sig);
+      trackPendingTx(sig, 'Stake transaction');
+      setStatus(`🛰️ Stake transaction submitted. Confirming...`);
+      await connection.confirmTransaction(sig, 'confirmed');
       setDestination(stakeAddress);
       await refreshWalletBalances(wallet);
       setStatus(`✅ Delegated ${createStakeSol} SOL to validator ${shortAddr(validatorVote)}. Swipe down from top to sync new stake account state.`);
     } catch (e: any) {
-      setStatus(actionError('Create+stake error', e));
+      suppressNextStatusModalRef.current = true;
+      if (classifyError(e) === 'user') {
+        setStatus('Create stake not submitted by wallet. Please retry.');
+      } else {
+        setStatus(`Create stake not submitted: ${normalizeErrorMessage(e)}`);
+      }
     } finally {
       setBusy(false);
     }
