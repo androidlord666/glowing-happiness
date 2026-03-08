@@ -1053,13 +1053,35 @@ export default function App() {
           const chunkLen = batchChunks[c].length;
           const txIndexes = Array.from({ length: chunkLen }, (_, i) => chunkStart + i);
           setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${txIndexes.length} tx)...`);
-          for (const txIndex of txIndexes) {
-            try {
-              // Use the same proven send+confirm path as sequential mode for reliability.
-              await submitSingleMergeTx(txIndex);
-            } catch (e: any) {
-              if (classifyError(e) === 'user') throw e;
-              failedMergeCount += 1;
+          try {
+            const preparedChunk = await Promise.all(txIndexes.map((idx) => buildPreparedMergeTx(idx)));
+            const sigs = await walletAdapter.signAndSendTransactions(preparedChunk);
+            for (let i = 0; i < txIndexes.length; i++) {
+              const sig = sigs[i];
+              if (!sig) {
+                // Retry missing entries one-by-one rather than failing whole batch.
+                try {
+                  await submitSingleMergeTx(txIndexes[i]);
+                } catch (e: any) {
+                  if (classifyError(e) === 'user') throw e;
+                  failedMergeCount += 1;
+                }
+                continue;
+              }
+              rememberTx(sig);
+              trackPendingTx(sig, `Consolidation tx ${txIndexes[i] + 1}/${mergeTxsToSend.length}`);
+              submittedMergeSigs.push(sig);
+            }
+          } catch (e: any) {
+            if (classifyError(e) === 'user') throw e;
+            // Wallet rejected chunk payload; degrade to per-tx submit for this chunk.
+            for (const txIndex of txIndexes) {
+              try {
+                await submitSingleMergeTx(txIndex);
+              } catch (singleErr: any) {
+                if (classifyError(singleErr) === 'user') throw singleErr;
+                failedMergeCount += 1;
+              }
             }
           }
           globalIdx += chunkLen;
