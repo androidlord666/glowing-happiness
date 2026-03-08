@@ -469,12 +469,17 @@ export default function App() {
   }, [selected, sourceStakeAccounts]);
 
   const selectedCount = sourceSelectedKeys.length;
-  const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
-  const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
   const destinationAccountMeta = useMemo(
     () => stakeAccounts.find((a) => a.pubkey === destination) ?? null,
     [stakeAccounts, destination]
   );
+  const compatibleSelectedCount = useMemo(() => {
+    const sourceMap = new Map(sourceStakeAccounts.map((a) => [a.pubkey, a] as const));
+    return sourceSelectedKeys.filter((k) => isMergeStateCompatible(destinationAccountMeta, sourceMap.get(k))).length;
+  }, [sourceSelectedKeys, sourceStakeAccounts, destinationAccountMeta]);
+  const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
+  const canConsolidate =
+    !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS && compatibleSelectedCount > 0;
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
   const withdrawReadyAccounts = useMemo(
     () =>
@@ -583,6 +588,26 @@ export default function App() {
     setSelected(next);
     setStatus(`Selected ${subset.length} source account(s).`);
   };
+
+  useEffect(() => {
+    // Keep selection aligned to current destination compatibility so cancel/reopen
+    // never leaves stale incompatible picks that block later consolidations.
+    setSelected((prev) => {
+      let changed = false;
+      const sourceMap = new Map(sourceStakeAccounts.map((a) => [a.pubkey, a] as const));
+      const next: Record<string, boolean> = {};
+      for (const [k, v] of Object.entries(prev)) {
+        if (!v) continue;
+        const src = sourceMap.get(k);
+        if (src && isMergeStateCompatible(destinationAccountMeta, src)) {
+          next[k] = true;
+        } else {
+          changed = true;
+        }
+      }
+      return changed ? next : prev;
+    });
+  }, [destinationAccountMeta, sourceStakeAccounts]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -919,6 +944,7 @@ export default function App() {
       }
 
       if (sourceSelectedKeys.length === 0) throw new Error('Select at least one source stake account below.');
+      if (compatibleSelectedCount === 0) throw new Error('No compatible source accounts selected for this destination.');
       if (sourceSelectedKeys.length > MAX_SOURCE_ACCOUNTS) throw new Error(`Max ${MAX_SOURCE_ACCOUNTS} source stake accounts`);
 
       setBusy(true);
