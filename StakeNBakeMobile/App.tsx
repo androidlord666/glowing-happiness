@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Buffer } from 'buffer';
 import {
   Linking,
@@ -18,6 +18,7 @@ import {
   RefreshControl,
 } from 'react-native';
 import Clipboard from '@react-native-clipboard/clipboard';
+import AsyncStorage from '@react-native-async-storage/async-storage';
 import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
@@ -39,6 +40,12 @@ import { APP_NAME, ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName,
 import { addressUrl, txUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
+import {
+  buildConsolidationSessionKey,
+  ConsolidationSendMode,
+  describeMergeCompatibility,
+  summarizePreflightRows,
+} from './src/lib/consolidation';
 
 const walletAdapter = createWalletAdapter();
 const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
@@ -49,7 +56,6 @@ type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
-type ConsolidationSendMode = 'sequential' | 'batch';
 type TxLifecycleStage = 'prepared' | 'sign_requested' | 'submitted' | 'confirmed' | 'failed';
 
 type TxLifecycleEvent = {
@@ -80,6 +86,7 @@ const PLATFORM_FEE_CAP_SKR = 100;
 const MAX_BATCH_TX_PER_REQUEST = 3;
 const STAKE_RENT_RESERVE_LAMPORTS = 2_282_880;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
+const TX_LIFECYCLE_STORAGE_KEY = '@stakeNbake:txLifecycleEvents:v1';
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -154,56 +161,8 @@ function hasWithdrawableLamports(lamports?: number): boolean {
   return Number(lamports ?? 0) > STAKE_RENT_RESERVE_LAMPORTS;
 }
 
-function describeMergeCompatibility(
-  destinationMeta?: StakeParsedMeta | StakeAccountInfo | null,
-  sourceMeta?: StakeParsedMeta | StakeAccountInfo | null
-): { ok: boolean; reason: string } {
-  const destState = presentStakeState((destinationMeta as any)?.delegationState ?? (destinationMeta as any)?.stakeState);
-  const sourceState = presentStakeState((sourceMeta as any)?.delegationState ?? (sourceMeta as any)?.stakeState);
-  const destType = String((destinationMeta as any)?.stakeType ?? '').toLowerCase();
-  const sourceType = String((sourceMeta as any)?.stakeType ?? '').toLowerCase();
-  const destVote = String((destinationMeta as any)?.delegationVote ?? '');
-  const sourceVote = String((sourceMeta as any)?.delegationVote ?? '');
-
-  if (!destinationMeta) return { ok: false, reason: 'destination missing' };
-  if (!sourceMeta) return { ok: false, reason: 'source missing' };
-
-  if (destState === 'syncing' || sourceState === 'syncing') {
-    return { ok: false, reason: 'state syncing; refresh first' };
-  }
-
-  const destDelegatedLike = destType === 'delegated' || destType === 'stake' || (!destType && isDelegatedState(destState));
-  const sourceDelegatedLike = sourceType === 'delegated' || sourceType === 'stake' || (!sourceType && isDelegatedState(sourceState));
-  if (!destDelegatedLike || !sourceDelegatedLike) {
-    return { ok: false, reason: 'must both be delegated-like stake accounts' };
-  }
-
-  if (destState === 'inactive' || sourceState === 'inactive') {
-    if (destState !== 'inactive' || sourceState !== 'inactive') {
-      return { ok: false, reason: 'inactive can only merge with inactive' };
-    }
-  }
-
-  if (destState === 'deactivating' || sourceState === 'deactivating') {
-    return { ok: false, reason: 'deactivating is blocked until fully inactive' };
-  }
-
-  if (
-    (destState === 'activating' && sourceState === 'deactivating') ||
-    (destState === 'deactivating' && sourceState === 'activating')
-  ) {
-    return { ok: false, reason: 'activating/deactivating pair is unstable' };
-  }
-
-  if (!destVote || !sourceVote || destVote !== sourceVote) {
-    return { ok: false, reason: 'validator vote mismatch' };
-  }
-
-  return { ok: true, reason: 'eligible' };
-}
-
 function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccountInfo | null, sourceMeta?: StakeParsedMeta | StakeAccountInfo | null): boolean {
-  return describeMergeCompatibility(destinationMeta, sourceMeta).ok;
+  return describeMergeCompatibility(destinationMeta as any, sourceMeta as any).ok;
 }
 
 function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
@@ -284,7 +243,7 @@ export default function App() {
   const [wallet, setWallet] = useState<string>('');
   const [mode, setMode] = useState<Mode>('stake');
   const [theme, setTheme] = useState<ThemeMode>('dark');
-  const [cluster, setCluster] = useState<ClusterName>(DEFAULT_CLUSTER);
+  const [cluster, _setCluster] = useState<ClusterName>(DEFAULT_CLUSTER);
   const [explorer, setExplorer] = useState<ExplorerName>(DEFAULT_EXPLORER);
   const [showSettings, setShowSettings] = useState(false);
   const [showExplorerOptions, setShowExplorerOptions] = useState(false);
@@ -465,6 +424,35 @@ export default function App() {
     }
   }, [status]);
 
+  useEffect(() => {
+    let cancelled = false;
+    const loadLifecycleEvents = async () => {
+      try {
+        const raw = await AsyncStorage.getItem(TX_LIFECYCLE_STORAGE_KEY);
+        if (!raw || cancelled) return;
+        const parsed = JSON.parse(raw);
+        if (!Array.isArray(parsed)) return;
+        setTxLifecycleEvents(
+          parsed
+            .filter((row: any) => row && typeof row.stage === 'string' && typeof row.label === 'string')
+            .slice(0, 100)
+        );
+      } catch {
+        // ignore persisted-state parse issues
+      }
+    };
+    loadLifecycleEvents();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  useEffect(() => {
+    AsyncStorage.setItem(TX_LIFECYCLE_STORAGE_KEY, JSON.stringify(txLifecycleEvents)).catch(() => {
+      // ignore storage failures
+    });
+  }, [txLifecycleEvents]);
+
   const delegatedAccounts = useMemo(
     () => stakeAccounts.filter((a) => isDelegatedState(a.stakeState)),
     [stakeAccounts]
@@ -517,20 +505,9 @@ export default function App() {
     return selectedCompatibility.filter((it) => it.ok).length;
   }, [selectedCompatibility]);
   const selectedIncompatibleCount = selectedCompatibility.length - compatibleSelectedCount;
-  const preflightReasonCounts = useMemo(() => {
-    const counts: Record<string, number> = {};
-    for (const item of selectedCompatibility) {
-      if (item.ok) continue;
-      counts[item.reason] = (counts[item.reason] ?? 0) + 1;
-    }
-    return counts;
-  }, [selectedCompatibility]);
   const preflightSummary = useMemo(() => {
-    const segments = Object.entries(preflightReasonCounts)
-      .sort((a, b) => b[1] - a[1])
-      .map(([reason, count]) => `${count} ${reason}`);
-    return segments.length ? segments.join(' · ') : 'No exclusions';
-  }, [preflightReasonCounts]);
+    return summarizePreflightRows(selectedCompatibility);
+  }, [selectedCompatibility]);
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate =
     !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS && compatibleSelectedCount > 0;
@@ -557,23 +534,23 @@ export default function App() {
   const consolidationFeeSkrText = consolidationFeeSkr.toFixed(2);
   const pendingTxSet = useMemo(() => new Set(pendingTxs.map((p) => p.sig)), [pendingTxs]);
 
-  const rememberTx = (sig: string) => {
+  const rememberTx = useCallback((sig: string) => {
     setLastSignature(sig);
     setTxHistory((prev) => [sig, ...prev.filter((s) => s !== sig)].slice(0, 5));
-  };
+  }, []);
 
-  const pushTxEvent = (event: Omit<TxLifecycleEvent, 'at'>) => {
+  const pushTxEvent = useCallback((event: Omit<TxLifecycleEvent, 'at'>) => {
     setTxLifecycleEvents((prev) => [{ ...event, at: new Date().toISOString() }, ...prev].slice(0, 100));
-  };
+  }, []);
 
-  const trackPendingTx = (sig: string, label: string) => {
+  const trackPendingTx = useCallback((sig: string, label: string) => {
     setPendingTxs((prev) => {
       if (prev.some((p) => p.sig === sig)) return prev;
       return [...prev, { sig, label }];
     });
-  };
+  }, []);
 
-  const refreshWalletBalances = async (walletAddr?: string) => {
+  const refreshWalletBalances = useCallback(async (walletAddr?: string) => {
     const active = walletAddr ?? wallet;
     if (!active) return;
     try {
@@ -591,7 +568,7 @@ export default function App() {
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
     }
-  };
+  }, [connection, wallet]);
 
   const onPullRefresh = async () => {
     if (!wallet) return;
@@ -724,7 +701,7 @@ export default function App() {
     }, 3500);
 
     return () => clearInterval(t);
-  }, [pendingTxs, connection, isAppActive]);
+  }, [pendingTxs, connection, isAppActive, pushTxEvent, refreshWalletBalances, rememberTx]);
 
   const connectWallet = async () => {
     if (busy) return;
@@ -984,9 +961,105 @@ export default function App() {
         await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
         setStatus(`✅ Withdraw confirmed to wallet ${shortAddr(wallet)}.`);
       }
-    } catch (e: any) {
+    } catch {
       suppressNextStatusModalRef.current = true;
       setStatus('Withdraw not submitted. Check account state and try again.');
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const onConsolidateDryRun = async () => {
+    if (busy) return;
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      if (!destination) throw new Error('Select destination stake account first');
+      if (sourceSelectedKeys.length === 0) throw new Error('Select source stake account(s) first');
+
+      setBusy(true);
+      setStatus('Preparing consolidation dry-run...');
+      const stakeMap = new Map(stakeAccounts.map((a) => [a.pubkey, a] as const));
+      const destinationAccount = stakeMap.get(destination);
+      if (!destinationAccount) throw new Error('Destination stake account not found. Refresh and try again.');
+
+      const rows = sourceSelectedKeys.map((k) => {
+        const src = stakeMap.get(k);
+        const verdict = describeMergeCompatibility(destinationAccount as any, src as any);
+        return { pubkey: k, ok: verdict.ok, reason: verdict.reason };
+      });
+      const eligibleSourceKeys = rows.filter((r) => r.ok).map((r) => r.pubkey);
+      if (!eligibleSourceKeys.length) {
+        setStatus(`Dry-run: no eligible sources. ${summarizePreflightRows(rows)}`);
+        return;
+      }
+
+      const owner = asPublicKey(wallet);
+      const txs = await buildConsolidationTransactions({
+        connection,
+        owner,
+        plan: {
+          destination: asPublicKey(destination),
+          sources: eligibleSourceKeys.map(asPublicKey),
+          validatorVote: asPublicKey(validatorVote),
+          includeDelegateTx: false,
+        },
+      });
+
+      let simPassed = 0;
+      let simFailed = 0;
+      const failures: Array<{ index: number; error: string }> = [];
+      for (let i = 0; i < txs.length; i++) {
+        try {
+          const tx = txs[i];
+          const recent = await connection.getLatestBlockhash('confirmed');
+          tx.recentBlockhash = recent.blockhash;
+          tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+          tx.feePayer = owner;
+          const sim: any = await connection.simulateTransaction(tx, {
+            replaceRecentBlockhash: true,
+            sigVerify: false,
+            commitment: 'confirmed',
+          } as any);
+          if (sim?.value?.err) {
+            simFailed += 1;
+            failures.push({ index: i + 1, error: JSON.stringify(sim.value.err) });
+          } else {
+            simPassed += 1;
+          }
+        } catch (e: any) {
+          simFailed += 1;
+          failures.push({ index: i + 1, error: normalizeErrorMessage(e) });
+        }
+      }
+
+      const report = {
+        type: 'consolidation-dry-run',
+        appVersion: APP_VERSION_LABEL,
+        cluster,
+        wallet,
+        destination,
+        mode: consolidationSendMode,
+        selectedCount: sourceSelectedKeys.length,
+        eligibleCount: eligibleSourceKeys.length,
+        excludedCount: rows.length - eligibleSourceKeys.length,
+        exclusionSummary: summarizePreflightRows(rows),
+        txCount: txs.length,
+        simulation: {
+          passed: simPassed,
+          failed: simFailed,
+        },
+        failures: failures.slice(0, 8),
+        createdAt: new Date().toISOString(),
+      };
+      Clipboard.setString(JSON.stringify(report, null, 2));
+      pushTxEvent({
+        stage: 'prepared',
+        label: 'Consolidation dry-run',
+        note: `eligible=${eligibleSourceKeys.length}, sim=${simPassed}/${txs.length}`,
+      });
+      setStatus(`Dry-run complete: ${simPassed}/${txs.length} simulation passed. Report copied.`);
+    } catch (e: any) {
+      setStatus(actionError('Dry-run failed', e));
     } finally {
       setBusy(false);
     }
@@ -1029,18 +1102,8 @@ export default function App() {
         setStatus('No compatible source accounts selected for this destination state.');
         return;
       }
-      const exclusionCounts: Record<string, number> = {};
-      for (const row of preflight) {
-        if (row.ok) continue;
-        exclusionCounts[row.reason] = (exclusionCounts[row.reason] ?? 0) + 1;
-      }
-      const exclusionSummary = Object.entries(exclusionCounts)
-        .sort((a, b) => b[1] - a[1])
-        .map(([reason, count]) => `${count} ${reason}`)
-        .join(' · ');
-
-      const eligibleSorted = [...eligibleSourceKeys].sort();
-      sessionKey = `${destination}|${eligibleSorted.join(',')}|${consolidationSendMode}`;
+      const exclusionSummary = summarizePreflightRows(preflight);
+      sessionKey = buildConsolidationSessionKey(destination, eligibleSourceKeys, consolidationSendMode);
       const now = Date.now();
       for (const [k, ts] of Object.entries(consolidationIdempotencyRef.current)) {
         if (now - ts > CONSOLIDATION_IDEMPOTENCY_WINDOW_MS) delete consolidationIdempotencyRef.current[k];
@@ -1286,7 +1349,7 @@ export default function App() {
     }
   };
 
-  const fetchSwapQuote = async () => {
+  const fetchSwapQuote = useCallback(async () => {
     try {
       const amountNum = Number(swapAmount);
       if (!Number.isFinite(amountNum) || amountNum <= 0) throw new Error('Enter a valid swap amount');
@@ -1348,7 +1411,15 @@ export default function App() {
     } finally {
       setSwapBusy(false);
     }
-  };
+  }, [
+    skrDecimals,
+    swapAmount,
+    swapDir,
+    swapSlippageBps,
+    wallet,
+    walletSolBalance,
+    walletSkrBalance,
+  ]);
 
   const executeSwapInApp = async () => {
     try {
@@ -1421,8 +1492,8 @@ export default function App() {
         setStatus('✅ Swap submitted. Confirming...');
         await connection.confirmTransaction(sigs[0], 'confirmed');
 
-        const owner = asPublicKey(wallet);
-        const ownerAta = getAssociatedTokenAddressSync(asPublicKey(SKR_MINT), owner);
+        const ownerPk = asPublicKey(wallet);
+        const ownerAta = getAssociatedTokenAddressSync(asPublicKey(SKR_MINT), ownerPk);
         let afterSol = beforeSol;
         let afterSkr = beforeSkr;
         const epsilon = 0.000001;
@@ -1430,7 +1501,7 @@ export default function App() {
         for (let attempt = 0; attempt < 6; attempt++) {
           const commitment = attempt < 2 ? 'processed' : 'confirmed';
           const [solLamports, skrBal] = await Promise.all([
-            connection.getBalance(owner, commitment as any),
+            connection.getBalance(ownerPk, commitment as any),
             connection.getTokenAccountBalance(ownerAta, commitment as any).catch(() => null),
           ]);
           afterSol = solLamports / LAMPORTS_PER_SOL;
@@ -1470,7 +1541,7 @@ export default function App() {
       fetchSwapQuote().catch(() => {});
     }, 10000);
     return () => clearInterval(tick);
-  }, [mode, isAppActive, swapAmount, swapDir, swapSlippageBps, swapBusy, walletSolBalance, walletSkrBalance]);
+  }, [mode, isAppActive, swapAmount, swapBusy, fetchSwapQuote]);
 
   const onSend = async () => {
     if (busy) return;
@@ -1618,7 +1689,7 @@ export default function App() {
   if (screen === 'splash') {
     const whitePhase = splashPhase === 0;
     return (
-      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: whitePhase ? '#fff' : '#000' }]}>
+      <SafeAreaView style={[styles.root, styles.centered, whitePhase ? styles.splashRootLight : styles.splashRootDark]}>
         <StatusBar barStyle={whitePhase ? 'dark-content' : 'light-content'} />
         <Image
           source={whitePhase ? solanaMobileBlackLogo : solanaMobileWhiteLogo}
@@ -1631,13 +1702,13 @@ export default function App() {
 
   if (screen === 'landing') {
     return (
-      <SafeAreaView style={[styles.root, styles.centered, { backgroundColor: '#000' }]}>
+      <SafeAreaView style={[styles.root, styles.centered, styles.landingRootDark]}>
         <StatusBar barStyle={'light-content'} />
         <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
           <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
-          <Text style={[styles.title, { color: '#fff' }]}>{APP_NAME}</Text>
-          <Text style={[styles.meta, { color: '#14F195', textAlign: 'center', marginBottom: 10 }]}>Network: Mainnet</Text>
-          <Text style={[styles.subtitle, { color: '#14F195' }]}>Connect wallet to continue.</Text>
+          <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
+          <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
+          <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
           <ActionButton label={busy ? 'Connecting…' : 'Connect Wallet'} onPress={connectWallet} />
         </Animated.View>
       </SafeAreaView>
@@ -1673,7 +1744,7 @@ export default function App() {
         <View style={[styles.card, { backgroundColor: palette.panel, borderColor: palette.border }]}>
           <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Wallet</Text>
           <View style={[styles.walletBox, theme === 'light' && styles.walletBoxLight]}>
-            <View style={{ flex: 1, marginRight: 8 }}>
+            <View style={styles.walletSummary}>
               <Text style={[styles.walletText, theme === 'light' && styles.walletTextLight]}>{shortAddr(wallet)}</Text>
               <Text style={[styles.meta, theme === 'light' && styles.walletTextLight]}>SOL: {walletSolBalance}</Text>
               <Text style={[styles.meta, theme === 'light' && styles.walletTextLight]}>SKR: {walletSkrBalance}</Text>
@@ -1789,6 +1860,11 @@ export default function App() {
               <ActionButton
                 label={pullRefreshing ? 'Refreshing…' : busy ? 'Consolidating…' : 'Consolidate'}
                 onPress={() => setConfirmConsolidate(true)}
+                disabled={!canConsolidate || pullRefreshing}
+              />
+              <ActionButton
+                label={pullRefreshing ? 'Refreshing…' : busy ? 'Dry Run…' : 'Dry Run'}
+                onPress={onConsolidateDryRun}
                 disabled={!canConsolidate || pullRefreshing}
               />
             </View>
@@ -2007,7 +2083,7 @@ export default function App() {
       </ScrollView>
 
       <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnTopRight}>
-        <Text style={{ fontSize: 18 }}>⚙️</Text>
+        <Text style={styles.gearIcon}>⚙️</Text>
       </Pressable>
 
       {showSettings && (
@@ -2126,6 +2202,7 @@ export default function App() {
             <Text style={styles.label}>Quick Tips</Text>
             <Text style={styles.meta}>• Create stake above rent-exempt minimum (tiny amounts fail by design).</Text>
             <Text style={styles.meta}>• Consolidate to one destination; use batch for large runs, sequential for step-by-step control.</Text>
+            <Text style={styles.meta}>• Use Dry Run before signing to get a simulation report and eligibility reasons.</Text>
             <Text style={styles.meta}>• Withdraw only when status is Inactive, then refresh after confirmations.</Text>
             <Text style={styles.meta}>• Pull down on the app to refresh balances and account states.</Text>
             <ActionButton label="Got it" onPress={() => setShowTips(false)} />
@@ -2159,6 +2236,12 @@ const styles = StyleSheet.create({
     borderColor: '#FF9B9B',
   },
   splashLogo: { width: 320, height: 90 },
+  splashRootLight: { backgroundColor: '#fff' },
+  splashRootDark: { backgroundColor: '#000' },
+  landingRootDark: { backgroundColor: '#000' },
+  landingTitle: { color: '#fff' },
+  landingNetworkMeta: { color: '#14F195', textAlign: 'center', marginBottom: 10 },
+  landingConnectHint: { color: '#14F195' },
   bannerLogo: { width: '100%', height: 46, marginBottom: 6 },
 
   card: {
@@ -2190,6 +2273,7 @@ const styles = StyleSheet.create({
     alignItems: 'center'
   },
   walletText: { color: colors.primary, fontWeight: '700' },
+  walletSummary: { flex: 1, marginRight: 8 },
   walletBoxLight: { backgroundColor: '#DDF7F1', borderColor: '#8ADFD3' },
   walletTextLight: { color: '#072225' },
   validatorBox: {
@@ -2263,6 +2347,7 @@ const styles = StyleSheet.create({
     backgroundColor: colors.panel,
     zIndex: 80,
   },
+  gearIcon: { fontSize: 18 },
   settingsSheet: {
     position: 'absolute',
     left: 12,

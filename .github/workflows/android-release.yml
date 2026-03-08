@@ -34,6 +34,14 @@ jobs:
         working-directory: StakeNBakeMobile
         run: npm install
 
+      - name: Lint (strict)
+        working-directory: StakeNBakeMobile
+        run: npm run lint -- --max-warnings 0
+
+      - name: Typecheck
+        working-directory: StakeNBakeMobile
+        run: npm exec tsc -- --noEmit
+
       - name: Prepare release signing files
         env:
           UPLOAD_KEYSTORE_BASE64: ${{ secrets.UPLOAD_KEYSTORE_BASE64 }}
