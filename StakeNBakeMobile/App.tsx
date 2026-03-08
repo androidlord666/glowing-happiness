@@ -165,6 +165,10 @@ function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccount
     if (destState !== 'inactive' || sourceState !== 'inactive') return false;
   }
 
+  // In practice, merge simulation is consistently unstable during cooldown.
+  // Require accounts to finish deactivation (inactive) before consolidation.
+  if (destState === 'deactivating' || sourceState === 'deactivating') return false;
+
   // Keep warmup and cooldown phases separated; this pair is unstable for merge simulation.
   if (
     (destState === 'activating' && sourceState === 'deactivating') ||
