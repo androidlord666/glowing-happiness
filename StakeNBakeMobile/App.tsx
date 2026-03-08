@@ -1041,110 +1041,6 @@ export default function App() {
     }
   };
 
-  const onConsolidateDryRun = async () => {
-    if (busy) return;
-    try {
-      if (!wallet) throw new Error('Wallet not connected');
-      if (!destination) throw new Error('Select destination stake account first');
-      if (sourceSelectedKeys.length === 0) throw new Error('Select source stake account(s) first');
-
-      setBusy(true);
-      setStatus('Preparing consolidation dry-run...');
-      const stakeMap = new Map(stakeAccounts.map((a) => [a.pubkey, a] as const));
-      const destinationAccount = stakeMap.get(destination);
-      if (!destinationAccount) throw new Error('Destination stake account not found. Refresh and try again.');
-
-      const rows = sourceSelectedKeys.map((k) => {
-        const src = stakeMap.get(k);
-        const verdict = describeMergeCompatibility(destinationAccount as any, src as any);
-        return { pubkey: k, ok: verdict.ok, reason: verdict.reason };
-      });
-      const eligibleSourceKeys = rows.filter((r) => r.ok).map((r) => r.pubkey);
-      if (!eligibleSourceKeys.length) {
-        setStatus(`Dry-run: no eligible sources. ${summarizePreflightRows(rows)}`);
-        return;
-      }
-
-      const owner = asPublicKey(wallet);
-      const txs = await buildConsolidationTransactions({
-        connection,
-        owner,
-        plan: {
-          destination: asPublicKey(destination),
-          sources: eligibleSourceKeys.map(asPublicKey),
-          validatorVote: asPublicKey(validatorVote),
-          includeDelegateTx: false,
-        },
-      });
-
-      let simPassed = 0;
-      let simFailed = 0;
-      const failures: Array<{ index: number; error: string }> = [];
-      for (let i = 0; i < txs.length; i++) {
-        try {
-          const tx = txs[i];
-          const recent = await connection.getLatestBlockhash('confirmed');
-          tx.recentBlockhash = recent.blockhash;
-          tx.lastValidBlockHeight = recent.lastValidBlockHeight;
-          tx.feePayer = owner;
-          const sim: any = await connection.simulateTransaction(tx, {
-            replaceRecentBlockhash: true,
-            sigVerify: false,
-            commitment: 'confirmed',
-          } as any);
-          if (sim?.value?.err) {
-            simFailed += 1;
-            failures.push({ index: i + 1, error: JSON.stringify(sim.value.err) });
-          } else {
-            simPassed += 1;
-          }
-        } catch (e: any) {
-          simFailed += 1;
-          failures.push({ index: i + 1, error: normalizeErrorMessage(e) });
-        }
-      }
-
-      const report = {
-        type: 'consolidation-dry-run',
-        appVersion: APP_VERSION_LABEL,
-        cluster,
-        wallet,
-        destination,
-        mode: consolidationSendMode,
-        selectedCount: sourceSelectedKeys.length,
-        eligibleCount: eligibleSourceKeys.length,
-        excludedCount: rows.length - eligibleSourceKeys.length,
-        exclusionSummary: summarizePreflightRows(rows),
-        txCount: txs.length,
-        simulation: {
-          passed: simPassed,
-          failed: simFailed,
-        },
-        failures: failures.slice(0, 8),
-        createdAt: new Date().toISOString(),
-      };
-      Clipboard.setString(JSON.stringify(report, null, 2));
-      pushTxEvent({
-        stage: 'prepared',
-        label: 'Consolidation dry-run',
-        note: `eligible=${eligibleSourceKeys.length}, sim=${simPassed}/${txs.length}`,
-      });
-      if (simFailed > 0) {
-        const firstFailure = failures[0]?.error ?? 'simulation error';
-        setStatus(
-          `Dry-run: eligible ${eligibleSourceKeys.length}, but simulation failed ${simFailed}/${txs.length}. ` +
-          `Top failure: ${firstFailure}. Report copied.`
-        );
-      } else {
-        setStatus(`Dry-run: eligible ${eligibleSourceKeys.length}, simulation passed ${simPassed}/${txs.length}. Report copied.`);
-      }
-    } catch (e: any) {
-      setStatus(actionError('Dry-run failed', e));
-    } finally {
-      setBusy(false);
-    }
-  };
-
   const onConsolidate = async () => {
     if (busy || consolidationInFlightRef.current) {
       setStatus('Consolidation already in progress.');
@@ -1975,11 +1871,6 @@ export default function App() {
                 onPress={() => setConfirmConsolidate(true)}
                 disabled={!canConsolidate || pullRefreshing}
               />
-              <ActionButton
-                label={pullRefreshing ? 'Refreshing…' : busy ? 'Dry Run…' : 'Dry Run'}
-                onPress={onConsolidateDryRun}
-                disabled={!canConsolidate || pullRefreshing}
-              />
             </View>
 
             <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, inactive below)</Text>
@@ -2324,7 +2215,6 @@ export default function App() {
             <Text style={styles.meta}>• Create stake above rent-exempt minimum (tiny amounts fail by design).</Text>
             <Text style={styles.meta}>• Consolidate to one destination; use batch for large runs, sequential for step-by-step control.</Text>
             <Text style={styles.meta}>• Batch chunk size is configurable (2/3/4); default 3 is best reliability.</Text>
-            <Text style={styles.meta}>• Use Dry Run before signing to get a simulation report and eligibility reasons.</Text>
             <Text style={styles.meta}>• Withdraw only when status is Inactive, then refresh after confirmations.</Text>
             <Text style={styles.meta}>• Pull down on the app to refresh balances and account states.</Text>
             <ActionButton label="Got it" onPress={() => setShowTips(false)} />
