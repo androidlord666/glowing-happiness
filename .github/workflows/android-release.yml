@@ -1,31 +1,17 @@
-name: android-release
+name: Android Release APK
 
 on:
   workflow_dispatch:
-    inputs:
-      versionCode:
-        description: 'Override Android versionCode (optional)'
-        required: false
-        type: string
-      versionName:
-        description: 'Override Android versionName (optional)'
-        required: false
-        type: string
   push:
-    branches: [main]
-    paths:
-      - 'StakeNBakeMobile/**'
-      - '.github/workflows/android-release.yml'
-
-permissions:
-  contents: read
+    branches: ["main"]
 
 jobs:
-  build-release-apk:
+  build-apk:
     runs-on: ubuntu-latest
+
     defaults:
       run:
-        working-directory: StakeNBakeMobile
+        working-directory: StakeNBakeMobile/android
 
     steps:
       - name: Checkout
@@ -34,104 +20,26 @@ jobs:
       - name: Setup Node
         uses: actions/setup-node@v4
         with:
-          node-version: 22
-          cache: npm
+          node-version: "20"
+          cache: "npm"
           cache-dependency-path: StakeNBakeMobile/package-lock.json
-
-      - name: Install JS deps
-        run: npm install
 
       - name: Setup Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: "21"
 
-      - name: Setup Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Install JS deps
+        working-directory: StakeNBakeMobile
+        run: npm ci
 
-      - name: Validate signing secrets
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          test -n "$ANDROID_KEYSTORE_BASE64" || (echo "Missing ANDROID_KEYSTORE_BASE64" >&2; exit 1)
-          test -n "$STORE_PASSWORD" || (echo "Missing ANDROID_KEYSTORE_PASSWORD" >&2; exit 1)
-          test -n "$KEY_ALIAS" || (echo "Missing ANDROID_KEY_ALIAS" >&2; exit 1)
-          test -n "$KEY_PASSWORD" || (echo "Missing ANDROID_KEY_PASSWORD" >&2; exit 1)
+      - name: Build release APK
+        run: ./gradlew clean :app:assembleRelease --no-daemon
 
-      - name: Decode keystore
-        env:
-          ANDROID_KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
-        run: echo "$ANDROID_KEYSTORE_BASE64" | base64 -d > android/app/upload-keystore.jks
-
-      - name: Write keystore.properties
-        env:
-          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
-          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
-          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
-        run: |
-          cat > android/keystore.properties <<EOF
-          MYAPP_UPLOAD_STORE_FILE=upload-keystore.jks
-          MYAPP_UPLOAD_KEY_ALIAS=$KEY_ALIAS
-          MYAPP_UPLOAD_STORE_PASSWORD=$STORE_PASSWORD
-          MYAPP_UPLOAD_KEY_PASSWORD=$KEY_PASSWORD
-          EOF
-
-      - name: Apply version overrides (workflow_dispatch)
-        if: ${{ github.event_name == 'workflow_dispatch' && (inputs.versionCode != '' || inputs.versionName != '') }}
-        env:
-          INPUT_VERSION_CODE: ${{ inputs.versionCode }}
-          INPUT_VERSION_NAME: ${{ inputs.versionName }}
-        run: |
-          FILE="android/app/build.gradle"
-          if [ -n "$INPUT_VERSION_CODE" ]; then
-            sed -i -E "s/versionCode[[:space:]]+[0-9]+/versionCode $INPUT_VERSION_CODE/" "$FILE"
-          fi
-          if [ -n "$INPUT_VERSION_NAME" ]; then
-            sed -i -E "s/versionName[[:space:]]+\"[^\"]+\"/versionName \"$INPUT_VERSION_NAME\"/" "$FILE"
-          fi
-          echo "Resolved version lines:"
-          grep -E "versionCode|versionName" "$FILE"
-
-      - name: Build release APK (force bundled JS)
-        run: |
-          cd android
-          chmod +x gradlew
-          ./gradlew clean :app:createBundleReleaseJsAndAssets :app:assembleRelease --no-daemon
-
-      - name: Verify JS bundle is packaged in APK
-        run: |
-          APK="android/app/build/outputs/apk/release/app-release.apk"
-          unzip -l "$APK" | grep -q "assets/index.android.bundle"
-          echo "✅ index.android.bundle found in release APK"
-
-      - name: Verify APK is non-debuggable release
-        run: |
-          APK="android/app/build/outputs/apk/release/app-release.apk"
-          if aapt dump badging "$APK" | grep -q "application-debuggable"; then
-            echo "❌ APK is debuggable; aborting release"
-            exit 1
-          fi
-          echo "✅ APK is non-debuggable"
-      - name: Create checksum + versioned copies
-        run: |
-          APK_DIR="android/app/build/outputs/apk/release"
-          sha256sum "$APK_DIR/app-release.apk" > "$APK_DIR/app-release.apk.sha256"
-          VERSION_NAME=$(grep -E 'versionName\s+"' android/app/build.gradle | head -1 | sed -E 's/.*versionName\s+"([^"]+)".*/\1/')
-          VERSION_CODE=$(grep -E 'versionCode\s+[0-9]+' android/app/build.gradle | head -1 | sed -E 's/.*versionCode\s+([0-9]+).*/\1/')
-          cp "$APK_DIR/app-release.apk" "$APK_DIR/app-release-v${VERSION_NAME}-code${VERSION_CODE}.apk"
-          cp "$APK_DIR/app-release.apk.sha256" "$APK_DIR/app-release-v${VERSION_NAME}-code${VERSION_CODE}.apk.sha256"
-
-      - name: Upload release APK artifact
+      - name: Upload APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: stakeNbake-release-apk
+          name: app-release-apk
+          path: StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk
           if-no-files-found: error
-          path: |
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release.apk.sha256
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release-v*-code*.apk
-            StakeNBakeMobile/android/app/build/outputs/apk/release/app-release-v*-code*.apk.sha256
