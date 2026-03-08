@@ -50,7 +50,3 @@ Expected APK:
 2. Configure Android signing keystore for release signing.
 3. Validate stake merge constraints on-device against real stake account states.
 4. Add dApp Store listing assets (icon/screenshots/copy/privacy text).
-
-## Security note
-
-Any tokens pasted in chat should be rotated after use.
