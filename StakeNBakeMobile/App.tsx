@@ -268,7 +268,7 @@ export default function App() {
   const suppressNextStatusModalRef = useRef(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
-  const [consolidationSendMode, setConsolidationSendMode] = useState<ConsolidationSendMode>('sequential');
+  const [consolidationSendMode, setConsolidationSendMode] = useState<ConsolidationSendMode>('batch');
   const modeFade = useState(new Animated.Value(1))[0];
   const landingFade = useState(new Animated.Value(0))[0];
   const pullShift = useRef(new Animated.Value(0)).current;
