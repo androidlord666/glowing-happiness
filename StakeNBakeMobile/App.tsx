@@ -2172,7 +2172,7 @@ export default function App() {
             <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
             <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
           </ScrollView>
-          <Text style={styles.settingsFooter}>built with ❤️ by rasetsukyo</Text>
+          <Text style={styles.settingsFooter}>built with ❤️ for Solana Mobile</Text>
 
         </View>
       )}
