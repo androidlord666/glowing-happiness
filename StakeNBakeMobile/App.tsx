@@ -334,7 +334,7 @@ export default function App() {
   const [txLifecycleEvents, setTxLifecycleEvents] = useState<TxLifecycleEvent[]>([]);
   const [walletSolBalance, setWalletSolBalance] = useState<string>('—');
   const [walletSkrBalance, setWalletSkrBalance] = useState<string>('—');
-  const [refreshBusy, setRefreshBusy] = useState(false);
+  const [_refreshBusy, setRefreshBusy] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
   const [stakeBusy, setStakeBusy] = useState(false);
   const [unstakeBusy, setUnstakeBusy] = useState(false);
