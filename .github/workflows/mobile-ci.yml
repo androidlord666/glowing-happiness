@@ -21,6 +21,8 @@ jobs:
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 30
 
       - name: Setup Node
         uses: actions/setup-node@v4
@@ -54,3 +56,25 @@ jobs:
         with:
           name: stakeNbake-debug-apk
           path: StakeNBakeMobile/android/app/build/outputs/apk/debug/app-debug.apk
+
+      - name: Generate CI changelog
+        working-directory: .
+        run: |
+          mkdir -p artifacts
+          {
+            echo "StakeNBake Mobile CI Build"
+            echo "Repository: $GITHUB_REPOSITORY"
+            echo "Workflow Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
+            echo "Commit: $GITHUB_SHA"
+            echo "Generated: $(date -u +'%Y-%m-%dT%H:%M:%SZ')"
+            echo ""
+            echo "Recent commits:"
+            git log -n 20 --pretty=format:'- %h %s (%ad)' --date=short
+          } > artifacts/ci-changelog.txt
+
+      - name: Upload CI changelog artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ci-changelog
+          path: artifacts/ci-changelog.txt
+          if-no-files-found: error

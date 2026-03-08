@@ -50,6 +50,16 @@ type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
 type ConsolidationSendMode = 'sequential' | 'batch';
+type TxLifecycleStage = 'prepared' | 'sign_requested' | 'submitted' | 'confirmed' | 'failed';
+
+type TxLifecycleEvent = {
+  at: string;
+  stage: TxLifecycleStage;
+  label: string;
+  sig?: string;
+  sessionKey?: string;
+  note?: string;
+};
 
 const APP_VERSION_LABEL = 'v2.40 (code 51)';
 const MAX_SOURCE_ACCOUNTS = 99;
@@ -69,6 +79,7 @@ const PLATFORM_FEE_CAP_SKR = 100;
 // Keep batch requests small for high reliability; 99-source runs are still supported via chunking.
 const MAX_BATCH_TX_PER_REQUEST = 3;
 const STAKE_RENT_RESERVE_LAMPORTS = 2_282_880;
+const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
 
 function shortAddr(v: string) {
   if (!v) return '';
@@ -143,7 +154,10 @@ function hasWithdrawableLamports(lamports?: number): boolean {
   return Number(lamports ?? 0) > STAKE_RENT_RESERVE_LAMPORTS;
 }
 
-function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccountInfo | null, sourceMeta?: StakeParsedMeta | StakeAccountInfo | null): boolean {
+function describeMergeCompatibility(
+  destinationMeta?: StakeParsedMeta | StakeAccountInfo | null,
+  sourceMeta?: StakeParsedMeta | StakeAccountInfo | null
+): { ok: boolean; reason: string } {
   const destState = presentStakeState((destinationMeta as any)?.delegationState ?? (destinationMeta as any)?.stakeState);
   const sourceState = presentStakeState((sourceMeta as any)?.delegationState ?? (sourceMeta as any)?.stakeState);
   const destType = String((destinationMeta as any)?.stakeType ?? '').toLowerCase();
@@ -151,36 +165,45 @@ function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccount
   const destVote = String((destinationMeta as any)?.delegationVote ?? '');
   const sourceVote = String((sourceMeta as any)?.delegationVote ?? '');
 
-  // Avoid sending borderline/unknown state pairs that usually fail simulation.
-  if (destState === 'syncing' || sourceState === 'syncing') return false;
+  if (!destinationMeta) return { ok: false, reason: 'destination missing' };
+  if (!sourceMeta) return { ok: false, reason: 'source missing' };
 
-  // Consolidation supports delegated stake merges. Some RPC responses may omit
-  // stakeType, so fall back to state-based inference for delegated/deactivating flows.
-  const destDelegatedLike = destType === 'delegated' || destType === 'stake' || (!destType && isDelegatedState(destState));
-  const sourceDelegatedLike = sourceType === 'delegated' || sourceType === 'stake' || (!sourceType && isDelegatedState(sourceState));
-  if (!destDelegatedLike || !sourceDelegatedLike) return false;
-
-  // If either side is inactive, both must be inactive delegated stake.
-  if (destState === 'inactive' || sourceState === 'inactive') {
-    if (destState !== 'inactive' || sourceState !== 'inactive') return false;
+  if (destState === 'syncing' || sourceState === 'syncing') {
+    return { ok: false, reason: 'state syncing; refresh first' };
   }
 
-  // In practice, merge simulation is consistently unstable during cooldown.
-  // Require accounts to finish deactivation (inactive) before consolidation.
-  if (destState === 'deactivating' || sourceState === 'deactivating') return false;
+  const destDelegatedLike = destType === 'delegated' || destType === 'stake' || (!destType && isDelegatedState(destState));
+  const sourceDelegatedLike = sourceType === 'delegated' || sourceType === 'stake' || (!sourceType && isDelegatedState(sourceState));
+  if (!destDelegatedLike || !sourceDelegatedLike) {
+    return { ok: false, reason: 'must both be delegated-like stake accounts' };
+  }
 
-  // Keep warmup and cooldown phases separated; this pair is unstable for merge simulation.
+  if (destState === 'inactive' || sourceState === 'inactive') {
+    if (destState !== 'inactive' || sourceState !== 'inactive') {
+      return { ok: false, reason: 'inactive can only merge with inactive' };
+    }
+  }
+
+  if (destState === 'deactivating' || sourceState === 'deactivating') {
+    return { ok: false, reason: 'deactivating is blocked until fully inactive' };
+  }
+
   if (
     (destState === 'activating' && sourceState === 'deactivating') ||
     (destState === 'deactivating' && sourceState === 'activating')
   ) {
-    return false;
+    return { ok: false, reason: 'activating/deactivating pair is unstable' };
   }
 
-  // Delegate/voter must match for a merge to be accepted.
-  if (!destVote || !sourceVote || destVote !== sourceVote) return false;
+  if (!destVote || !sourceVote || destVote !== sourceVote) {
+    return { ok: false, reason: 'validator vote mismatch' };
+  }
 
-  return true;
+  return { ok: true, reason: 'eligible' };
+}
+
+function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccountInfo | null, sourceMeta?: StakeParsedMeta | StakeAccountInfo | null): boolean {
+  return describeMergeCompatibility(destinationMeta, sourceMeta).ok;
 }
 
 function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
@@ -289,6 +312,7 @@ export default function App() {
   const [lastSignature, setLastSignature] = useState('');
   const [txHistory, setTxHistory] = useState<string[]>([]);
   const [pendingTxs, setPendingTxs] = useState<Array<{ sig: string; label: string }>>([]);
+  const [txLifecycleEvents, setTxLifecycleEvents] = useState<TxLifecycleEvent[]>([]);
   const [walletSolBalance, setWalletSolBalance] = useState<string>('—');
   const [walletSkrBalance, setWalletSkrBalance] = useState<string>('—');
   const [busy, setBusy] = useState(false);
@@ -311,6 +335,8 @@ export default function App() {
   const lastRefreshAtRef = useRef(0);
   const refreshInProgressRef = useRef(false);
   const refreshMetricsRef = useRef({ count: 0, totalMs: 0 });
+  const consolidationInFlightRef = useRef(false);
+  const consolidationIdempotencyRef = useRef<Record<string, number>>({});
 
   const palette = theme === 'dark'
     ? colors
@@ -479,10 +505,32 @@ export default function App() {
     () => stakeAccounts.find((a) => a.pubkey === destination) ?? null,
     [stakeAccounts, destination]
   );
-  const compatibleSelectedCount = useMemo(() => {
+  const selectedCompatibility = useMemo(() => {
     const sourceMap = new Map(sourceStakeAccounts.map((a) => [a.pubkey, a] as const));
-    return sourceSelectedKeys.filter((k) => isMergeStateCompatible(destinationAccountMeta, sourceMap.get(k))).length;
+    return sourceSelectedKeys.map((k) => {
+      const src = sourceMap.get(k);
+      const verdict = describeMergeCompatibility(destinationAccountMeta, src);
+      return { pubkey: k, ok: verdict.ok, reason: verdict.reason };
+    });
   }, [sourceSelectedKeys, sourceStakeAccounts, destinationAccountMeta]);
+  const compatibleSelectedCount = useMemo(() => {
+    return selectedCompatibility.filter((it) => it.ok).length;
+  }, [selectedCompatibility]);
+  const selectedIncompatibleCount = selectedCompatibility.length - compatibleSelectedCount;
+  const preflightReasonCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const item of selectedCompatibility) {
+      if (item.ok) continue;
+      counts[item.reason] = (counts[item.reason] ?? 0) + 1;
+    }
+    return counts;
+  }, [selectedCompatibility]);
+  const preflightSummary = useMemo(() => {
+    const segments = Object.entries(preflightReasonCounts)
+      .sort((a, b) => b[1] - a[1])
+      .map(([reason, count]) => `${count} ${reason}`);
+    return segments.length ? segments.join(' · ') : 'No exclusions';
+  }, [preflightReasonCounts]);
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate =
     !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS && compatibleSelectedCount > 0;
@@ -512,6 +560,10 @@ export default function App() {
   const rememberTx = (sig: string) => {
     setLastSignature(sig);
     setTxHistory((prev) => [sig, ...prev.filter((s) => s !== sig)].slice(0, 5));
+  };
+
+  const pushTxEvent = (event: Omit<TxLifecycleEvent, 'at'>) => {
+    setTxLifecycleEvents((prev) => [{ ...event, at: new Date().toISOString() }, ...prev].slice(0, 100));
   };
 
   const trackPendingTx = (sig: string, label: string) => {
@@ -657,6 +709,7 @@ export default function App() {
               done.add(meta.sig);
               setStatus(`✅ ${meta.label} confirmed.`);
               rememberTx(meta.sig);
+              pushTxEvent({ stage: 'confirmed', label: meta.label, sig: meta.sig });
             }
           }
         });
@@ -940,7 +993,12 @@ export default function App() {
   };
 
   const onConsolidate = async () => {
-    if (busy) return;
+    if (busy || consolidationInFlightRef.current) {
+      setStatus('Consolidation already in progress.');
+      return;
+    }
+    let sessionKey = '';
+    let anySubmitted = false;
     try {
       if (!wallet) throw new Error('Wallet not connected');
       if (!destination) throw new Error('Select destination stake account from list below');
@@ -953,25 +1011,55 @@ export default function App() {
       if (compatibleSelectedCount === 0) throw new Error('No compatible source accounts selected for this destination.');
       if (sourceSelectedKeys.length > MAX_SOURCE_ACCOUNTS) throw new Error(`Max ${MAX_SOURCE_ACCOUNTS} source stake accounts`);
 
-      setBusy(true);
       setStatus('Validating merge eligibility...');
 
       const stakeMap = new Map(stakeAccounts.map((a) => [a.pubkey, a] as const));
       const destinationAccount = stakeMap.get(destination);
       if (!destinationAccount) throw new Error('Destination stake account not found in current list. Refresh and try again.');
-      const incompatibleCount = sourceSelectedKeys.filter((k) => {
+
+      const preflight = sourceSelectedKeys.map((k) => {
         const src = stakeMap.get(k);
-        return !isMergeStateCompatible(destinationAccount, src);
-      }).length;
-      const eligibleSourceKeys = sourceSelectedKeys.filter((k) => {
-        const src = stakeMap.get(k);
-        return isMergeStateCompatible(destinationAccount, src);
+        const verdict = describeMergeCompatibility(destinationAccount, src);
+        return { pubkey: k, ok: verdict.ok, reason: verdict.reason };
       });
+      const incompatibleCount = preflight.filter((it) => !it.ok).length;
+      const eligibleSourceKeys = preflight.filter((it) => it.ok).map((it) => it.pubkey);
       if (eligibleSourceKeys.length === 0) {
         suppressNextStatusModalRef.current = true;
         setStatus('No compatible source accounts selected for this destination state.');
         return;
       }
+      const exclusionCounts: Record<string, number> = {};
+      for (const row of preflight) {
+        if (row.ok) continue;
+        exclusionCounts[row.reason] = (exclusionCounts[row.reason] ?? 0) + 1;
+      }
+      const exclusionSummary = Object.entries(exclusionCounts)
+        .sort((a, b) => b[1] - a[1])
+        .map(([reason, count]) => `${count} ${reason}`)
+        .join(' · ');
+
+      const eligibleSorted = [...eligibleSourceKeys].sort();
+      sessionKey = `${destination}|${eligibleSorted.join(',')}|${consolidationSendMode}`;
+      const now = Date.now();
+      for (const [k, ts] of Object.entries(consolidationIdempotencyRef.current)) {
+        if (now - ts > CONSOLIDATION_IDEMPOTENCY_WINDOW_MS) delete consolidationIdempotencyRef.current[k];
+      }
+      const existing = consolidationIdempotencyRef.current[sessionKey];
+      if (existing && now - existing < CONSOLIDATION_IDEMPOTENCY_WINDOW_MS) {
+        setStatus('Duplicate consolidation request blocked (idempotency guard). Wait 2 minutes or change selection.');
+        return;
+      }
+      consolidationIdempotencyRef.current[sessionKey] = now;
+      consolidationInFlightRef.current = true;
+      setBusy(true);
+      pushTxEvent({
+        stage: 'prepared',
+        label: 'Consolidation preflight',
+        sessionKey,
+        note: `eligible=${eligibleSourceKeys.length} excluded=${incompatibleCount}${exclusionSummary ? ` (${exclusionSummary})` : ''}`,
+      });
+      setStatus(`Preflight complete: ${eligibleSourceKeys.length} eligible, ${incompatibleCount} excluded.${exclusionSummary ? ` ${exclusionSummary}.` : ''}`);
 
       const owner = asPublicKey(wallet);
       // Delegate-in-consolidation has proven brittle across stake-state transitions.
@@ -1032,12 +1120,16 @@ export default function App() {
         delegateTx.lastValidBlockHeight = recent.lastValidBlockHeight;
         delegateTx.feePayer = owner;
         setStatus('Submitting destination delegate transaction...');
+        pushTxEvent({ stage: 'sign_requested', label: 'Destination delegate transaction', sessionKey });
         const sigs = await walletAdapter.signAndSendTransactions([delegateTx]);
         const sig = sigs[0];
         if (!sig) throw new Error('Destination delegate transaction was not signed/submitted.');
         rememberTx(sig);
         trackPendingTx(sig, 'Destination delegate transaction');
+        anySubmitted = true;
+        pushTxEvent({ stage: 'submitted', label: 'Destination delegate transaction', sig, sessionKey });
         await connection.confirmTransaction(sig, 'confirmed');
+        pushTxEvent({ stage: 'confirmed', label: 'Destination delegate transaction', sig, sessionKey });
       }
 
       const submittedMergeSigs: string[] = [];
@@ -1073,14 +1165,20 @@ export default function App() {
         return tx;
       };
       const submitSingleMergeTx = async (txIndex: number) => {
+        const label = `Consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}`;
         const tx = await buildPreparedMergeTx(txIndex);
-        setStatus(`Submitting consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}...`);
+        setStatus(`Submitting ${label}...`);
+        pushTxEvent({ stage: 'prepared', label, sessionKey });
+        pushTxEvent({ stage: 'sign_requested', label, sessionKey });
         const sigs = await walletAdapter.signAndSendTransactions([tx]);
         const sig = sigs[0];
         if (!sig) throw new Error('wallet returned empty signature');
         rememberTx(sig);
-        trackPendingTx(sig, `Consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}`);
+        trackPendingTx(sig, label);
+        anySubmitted = true;
+        pushTxEvent({ stage: 'submitted', label, sig, sessionKey });
         await connection.confirmTransaction(sig, 'confirmed');
+        pushTxEvent({ stage: 'confirmed', label, sig, sessionKey });
         submittedMergeSigs.push(sig);
       };
       if (consolidationSendMode === 'batch') {
@@ -1091,19 +1189,29 @@ export default function App() {
           const chunkLen = batchChunks[c].length;
           const txIndexes = Array.from({ length: chunkLen }, (_, i) => chunkStart + i);
           setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${txIndexes.length} tx)...`);
+          for (const idx of txIndexes) {
+            pushTxEvent({ stage: 'prepared', label: `Consolidation tx ${idx + 1}/${mergeTxsToSend.length}`, sessionKey });
+          }
           try {
             const preparedChunk = await Promise.all(txIndexes.map((idx) => buildPreparedMergeTx(idx)));
+            for (const idx of txIndexes) {
+              pushTxEvent({ stage: 'sign_requested', label: `Consolidation tx ${idx + 1}/${mergeTxsToSend.length}`, sessionKey });
+            }
             const sigs = await walletAdapter.signAndSendTransactions(preparedChunk);
             for (let i = 0; i < txIndexes.length; i++) {
               const sig = sigs[i];
+              const label = `Consolidation tx ${txIndexes[i] + 1}/${mergeTxsToSend.length}`;
               if (!sig) {
                 // Do not auto-retry missing signatures: wallet may have already submitted
                 // the transaction and retrying can create duplicate sends.
                 failedMergeCount += 1;
+                pushTxEvent({ stage: 'failed', label, sessionKey, note: 'wallet returned empty signature' });
                 continue;
               }
               rememberTx(sig);
-              trackPendingTx(sig, `Consolidation tx ${txIndexes[i] + 1}/${mergeTxsToSend.length}`);
+              trackPendingTx(sig, label);
+              anySubmitted = true;
+              pushTxEvent({ stage: 'submitted', label, sig, sessionKey });
               submittedMergeSigs.push(sig);
             }
           } catch (e: any) {
@@ -1111,6 +1219,14 @@ export default function App() {
             // Do not auto-fallback/resubmit on chunk errors; this can double-submit
             // if wallet partially accepted the batch before returning an error.
             failedMergeCount += txIndexes.length;
+            for (const idx of txIndexes) {
+              pushTxEvent({
+                stage: 'failed',
+                label: `Consolidation tx ${idx + 1}/${mergeTxsToSend.length}`,
+                sessionKey,
+                note: normalizeErrorMessage(e),
+              });
+            }
           }
           globalIdx += chunkLen;
         }
@@ -1118,6 +1234,7 @@ export default function App() {
           submittedMergeSigs.map(async (sig) => {
             try {
               await connection.confirmTransaction(sig, 'confirmed');
+              pushTxEvent({ stage: 'confirmed', label: 'Consolidation tx', sig, sessionKey });
             } catch {
               // confirmation can lag; submitted signatures still prove signing success
             }
@@ -1130,6 +1247,12 @@ export default function App() {
           } catch (e: any) {
             if (classifyError(e) === 'user') throw e;
             failedMergeCount += 1;
+            pushTxEvent({
+              stage: 'failed',
+              label: `Consolidation tx ${i + 1}/${mergeTxsToSend.length}`,
+              sessionKey,
+              note: normalizeErrorMessage(e),
+            });
           }
         }
       }
@@ -1145,11 +1268,21 @@ export default function App() {
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
+      pushTxEvent({
+        stage: 'failed',
+        label: 'Consolidation session',
+        sessionKey: sessionKey || undefined,
+        note: normalizeErrorMessage(e),
+      });
       setStatus('Consolidation not submitted. Please try again.');
     } finally {
+      consolidationInFlightRef.current = false;
       setBusy(false);
       // Prevent stale incompatible selections from poisoning the next run.
       setSelected({});
+      if (sessionKey && !anySubmitted) {
+        delete consolidationIdempotencyRef.current[sessionKey];
+      }
     }
   };
 
@@ -1412,6 +1545,7 @@ export default function App() {
       selectedSourceCount: selectedCount,
       lastSignature: lastSignature || null,
       pendingTxCount: pendingTxs.length,
+      txLifecycleEvents: txLifecycleEvents.slice(0, 25),
       avgRefreshMs,
       status,
       consolidationSendMode,
@@ -1441,12 +1575,24 @@ export default function App() {
       consolidationSendMode,
       lastSignature,
       recentTxs: txHistory,
+      txLifecycleEvents: txLifecycleEvents.slice(0, 50),
       wallet,
       destination,
       timestamp: new Date().toISOString(),
     };
     Clipboard.setString(JSON.stringify(payload, null, 2));
     setStatus('Support bundle copied.');
+  };
+
+  const copyTxLifecycleReport = () => {
+    const payload = {
+      app: 'stakeNbake',
+      version: APP_VERSION_LABEL,
+      timestamp: new Date().toISOString(),
+      events: txLifecycleEvents,
+    };
+    Clipboard.setString(JSON.stringify(payload, null, 2));
+    setStatus('TX lifecycle report copied.');
   };
 
   const copyFeeWallet = () => {
@@ -1605,6 +1751,7 @@ export default function App() {
               </Text>
             </Text>
             <Text style={styles.meta}>Withdraw is enabled only when state is Inactive.</Text>
+            <Text style={styles.meta}>State rules: active/activating can unstake; deactivating must finish epoch before merge/withdraw; inactive is withdraw-ready.</Text>
 
             <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Consolidate existing stake accounts</Text>
             <Text style={styles.meta}>Authority wallet: {shortAddr(wallet)}</Text>
@@ -1648,6 +1795,8 @@ export default function App() {
 
             <Text style={styles.meta}>Source stake accounts (excluding destination · delegated first, inactive below)</Text>
             <Text style={styles.meta}>Selected source accounts: {selectedCount}/{MAX_SOURCE_ACCOUNTS}</Text>
+            <Text style={styles.meta}>Preflight now: eligible {compatibleSelectedCount} · excluded {selectedIncompatibleCount}</Text>
+            <Text style={styles.meta}>Exclusion reasons: {preflightSummary}</Text>
             <Text style={styles.meta}>Platform fee: {consolidationFeeSkrText} SKR (SKR only · supports maintenance & RPC costs)</Text>
             <View style={styles.row}>
               <ActionButton label={pullRefreshing ? 'Refreshing…' : `Filter: ${sourceFilter}`} onPress={() => setSourceFilter((f) => f === 'high' ? 'low' : f === 'low' ? 'all' : 'high')} disabled={pullRefreshing} />
@@ -1665,7 +1814,8 @@ export default function App() {
               windowSize={7}
               renderItem={({ item: a }) => {
                 const checked = !!selected[a.pubkey];
-                const compatible = isMergeStateCompatible(destinationAccountMeta, a);
+                const compatibility = describeMergeCompatibility(destinationAccountMeta, a);
+                const compatible = compatibility.ok;
                 return (
                   <Text
                     style={[
@@ -1685,7 +1835,7 @@ export default function App() {
                       setSelected(next);
                     }}
                   >
-                    {compatible ? (checked ? '☑' : '☐') : '⛔'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · <Text style={isInactiveState(a.stakeState) ? styles.stateInactive : undefined}>{displayStakeState(a.stakeState)}</Text>{!compatible ? ' · incompatible with destination state' : ''}
+                    {compatible ? (checked ? '☑' : '☐') : '⛔'} {a.pubkey.slice(0, 6)}...{a.pubkey.slice(-6)} · {(a.lamports / LAMPORTS_PER_SOL).toFixed(4)} SOL · <Text style={isInactiveState(a.stakeState) ? styles.stateInactive : undefined}>{displayStakeState(a.stakeState)}</Text>{!compatible ? ` · ${compatibility.reason}` : ''}
                   </Text>
                 );
               }}
@@ -1844,6 +1994,16 @@ export default function App() {
             })}
           </View>
         )}
+        {txLifecycleEvents.length > 0 && (
+          <View>
+            <Text style={styles.meta}>TX lifecycle (latest 5)</Text>
+            {txLifecycleEvents.slice(0, 5).map((ev, idx) => (
+              <Text key={`${ev.at}-${ev.label}-${idx}`} style={styles.meta}>
+                {idx + 1}. [{ev.stage}] {ev.label}{ev.sig ? ` · ${shortAddr(ev.sig)}` : ''}{ev.note ? ` · ${ev.note}` : ''}
+              </Text>
+            ))}
+          </View>
+        )}
       </ScrollView>
 
       <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnTopRight}>
@@ -1877,6 +2037,7 @@ export default function App() {
           <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
           <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
           <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
+          <ActionButton label="Copy TX Lifecycle Report" onPress={copyTxLifecycleReport} />
           <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
           <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
 
@@ -1893,6 +2054,16 @@ export default function App() {
             <Text style={styles.meta}>Fee wallet: {shortAddr(PLATFORM_FEE_WALLET)}</Text>
             <Text style={styles.meta}>Mode: {consolidationSendMode === 'sequential' ? 'Sequential' : 'Batch'}</Text>
             <Text style={styles.meta}>Breakdown: fee tx 1 + merge txs {estimatedMergeTxCount}</Text>
+            <Text style={styles.meta}>Preflight: eligible {compatibleSelectedCount} · excluded {selectedIncompatibleCount}</Text>
+            <Text style={styles.meta}>Reasons: {preflightSummary}</Text>
+            {selectedCompatibility.slice(0, 8).map((row) => (
+              <Text key={`pf-${row.pubkey}`} style={styles.meta}>
+                {row.ok ? '✅' : '⛔'} {shortAddr(row.pubkey)} · {row.reason}
+              </Text>
+            ))}
+            {selectedCompatibility.length > 8 && (
+              <Text style={styles.meta}>…and {selectedCompatibility.length - 8} more selected sources.</Text>
+            )}
             <Text style={styles.meta}>No hidden fees.</Text>
             <View style={styles.row}>
               <ActionButton label="Cancel" onPress={() => setConfirmConsolidate(false)} />
@@ -1943,6 +2114,7 @@ export default function App() {
             <Text style={styles.meta}>• Withdraw flow and inactive-account handling improved</Text>
             <Text style={styles.meta}>• Wallet box now shows SOL and SKR balances</Text>
             <Text style={styles.meta}>• Lifecycle/app-switch stability hardening</Text>
+            <Text style={styles.meta}>• Consolidation preflight + tx lifecycle reporting + idempotency guard</Text>
             <ActionButton label="Close" onPress={() => setShowWhatsNew(false)} />
           </View>
         </View>
