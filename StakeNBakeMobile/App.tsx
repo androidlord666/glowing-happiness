@@ -1038,38 +1038,19 @@ export default function App() {
           const chunkStart = globalIdx;
           const chunkLen = batchChunks[c].length;
           const txIndexes = Array.from({ length: chunkLen }, (_, i) => chunkStart + i);
-          try {
-            const preparedChunk = await Promise.all(txIndexes.map((idx) => buildPreparedMergeTx(idx)));
-            setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${preparedChunk.length} tx)...`);
-            const sigs = await walletAdapter.signAndSendTransactions(preparedChunk);
-            for (let i = 0; i < preparedChunk.length; i++) {
-              const sig = sigs[i];
-              const index = txIndexes[i] + 1;
-              if (!sig) {
-                // Some wallets may return fewer signatures than submitted txs.
-                // Retry missing entries one-by-one to avoid false failures.
-                try {
-                  await submitSingleMergeTx(txIndexes[i]);
-                } catch (e: any) {
-                  if (classifyError(e) === 'user') throw e;
-                  failedMergeCount += 1;
-                }
-                continue;
-              }
+          setStatus(`Submitting consolidation batch ${c + 1}/${batchChunks.length} (${txIndexes.length} tx)...`);
+          for (const txIndex of txIndexes) {
+            try {
+              const tx = await buildPreparedMergeTx(txIndex);
+              const sigs = await walletAdapter.signAndSendTransactions([tx]);
+              const sig = sigs[0];
+              if (!sig) throw new Error('wallet returned empty signature');
               rememberTx(sig);
-              trackPendingTx(sig, `Consolidation tx ${index}/${mergeTxsToSend.length}`);
+              trackPendingTx(sig, `Consolidation tx ${txIndex + 1}/${mergeTxsToSend.length}`);
               submittedMergeSigs.push(sig);
-            }
-          } catch (e: any) {
-            if (classifyError(e) === 'user') throw e;
-            setStatus(`Batch ${c + 1}/${batchChunks.length} failed; retrying sequentially for this chunk...`);
-            for (const txIndex of txIndexes) {
-              try {
-                await submitSingleMergeTx(txIndex);
-              } catch (singleErr: any) {
-                if (classifyError(singleErr) === 'user') throw singleErr;
-                failedMergeCount += 1;
-              }
+            } catch (e: any) {
+              if (classifyError(e) === 'user') throw e;
+              failedMergeCount += 1;
             }
           }
           globalIdx += chunkLen;
