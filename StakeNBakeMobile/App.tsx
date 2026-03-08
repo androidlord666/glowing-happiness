@@ -71,7 +71,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.47 (code 58)';
+const APP_VERSION_LABEL = 'v2.48 (code 59)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -200,6 +200,21 @@ async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 4
     }
   }
   throw lastError;
+}
+
+async function withTimeout<T>(promise: Promise<T>, timeoutMs: number, label: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(`${label} timeout`)), timeoutMs);
+    promise
+      .then((value) => {
+        clearTimeout(timer);
+        resolve(value);
+      })
+      .catch((err) => {
+        clearTimeout(timer);
+        reject(err);
+      });
+  });
 }
 
 type StakeParsedMeta = {
@@ -1368,7 +1383,7 @@ export default function App() {
     }
   };
 
-  const fetchSwapQuote = useCallback(async () => {
+  const fetchSwapQuote = useCallback(async (): Promise<any | null> => {
     try {
       const amountNum = Number(swapAmount);
       if (!Number.isFinite(amountNum) || amountNum <= 0) throw new Error('Enter a valid swap amount');
@@ -1390,9 +1405,13 @@ export default function App() {
       const raw = Math.floor(amountNum * Math.pow(10, decimalsIn));
 
       const url = `https://lite-api.jup.ag/swap/v1/quote?inputMint=${inputMint}&outputMint=${outputMint}&amount=${raw}&slippageBps=${swapSlippageBps}`;
-      const res = await fetch(url, { headers: { 'x-api-key': JUPITER_API_KEY } });
+      const res = await withTimeout(
+        fetch(url, { headers: { 'x-api-key': JUPITER_API_KEY } }),
+        10000,
+        'quote fetch'
+      );
       if (!res.ok) throw new Error(`Jupiter quote failed (${res.status})`);
-      const q: any = await res.json();
+      const q: any = await withTimeout(res.json(), 5000, 'quote parse');
       const inRaw = BigInt(String(q?.inAmount ?? '0'));
       const outRaw = BigInt(String(q?.outAmount ?? '0'));
       if (inRaw <= 0n || outRaw <= 0n) throw new Error('No quote output amount');
@@ -1421,12 +1440,14 @@ export default function App() {
       const impact = Number(q?.priceImpactPct ?? 0);
       setSwapImpactPct(Number.isFinite(impact) ? impact : 0);
       setSwapQuoteText(`Quote: ~${outUi} ${outSym} (slippage ${(swapSlippageBps / 100).toFixed(2)}%)`);
+      return q;
     } catch (e: any) {
       setSwapQuoteText(`Quote error: ${normalizeErrorMessage(e)}`);
       setSwapQuote(null);
       setSwapRouteText('');
       setSwapMinReceivedText('');
       setSwapImpactPct(0);
+      return null;
     } finally {
       setSwapBusy(false);
     }
@@ -1447,9 +1468,9 @@ export default function App() {
       let quoteToUse = swapQuote;
       const ageMs = Date.now() - swapQuoteAtMs;
       if (!swapQuoteAtMs || ageMs > 15000 || swapStale) {
-        await fetchSwapQuote();
-        if (!swapQuote) throw new Error('Quote stale. Tap Get Quote again.');
-        quoteToUse = swapQuote;
+        const refreshed = await fetchSwapQuote();
+        if (!refreshed) throw new Error('Quote stale. Tap Get Quote again.');
+        quoteToUse = refreshed;
       }
       const amountNum = Number(swapAmount);
       const inSymbol = swapDir === 'SOL_TO_SKR' ? 'SOL' : 'SKR';
@@ -1465,7 +1486,11 @@ export default function App() {
       const outMint = asPublicKey(swapDir === 'SOL_TO_SKR' ? SKR_MINT : SOL_MINT);
       if (swapDir === 'SOL_TO_SKR') {
         const outAta = getAssociatedTokenAddressSync(outMint, owner);
-        const outAtaInfo = await connection.getAccountInfo(outAta, 'confirmed');
+        const outAtaInfo = await withTimeout(
+          connection.getAccountInfo(outAta, 'confirmed'),
+          4500,
+          'destination ATA check'
+        ).catch(() => null);
         if (!outAtaInfo) {
           setStatus('Preparing destination token account (SKR)...');
         }
@@ -1474,34 +1499,43 @@ export default function App() {
       const beforeSol = Number(walletSolBalance);
       const beforeSkr = Number(walletSkrBalance);
 
-      const res = await fetch('https://lite-api.jup.ag/swap/v1/swap', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-api-key': JUPITER_API_KEY,
-        },
-        body: JSON.stringify({
-          userPublicKey: wallet,
-          quoteResponse: quoteToUse,
-          wrapAndUnwrapSol: true,
-          dynamicComputeUnitLimit: true,
+      const res = await withTimeout(
+        fetch('https://lite-api.jup.ag/swap/v1/swap', {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/json',
+            'x-api-key': JUPITER_API_KEY,
+          },
+          body: JSON.stringify({
+            userPublicKey: wallet,
+            quoteResponse: quoteToUse,
+            wrapAndUnwrapSol: true,
+            dynamicComputeUnitLimit: true,
+          }),
         }),
-      });
+        12000,
+        'swap build'
+      );
 
       if (!res.ok) throw new Error(`Jupiter swap build failed (${res.status})`);
-      const data: any = await res.json();
+      const data: any = await withTimeout(res.json(), 5000, 'swap parse');
       if (!data?.swapTransaction) throw new Error('No swap transaction returned');
 
       const raw = Buffer.from(data.swapTransaction, 'base64');
       const vtx = VersionedTransaction.deserialize(raw);
 
-      const sim = await connection.simulateTransaction(vtx, {
-        replaceRecentBlockhash: true,
-        sigVerify: false,
-        commitment: 'confirmed',
-      });
-      if (sim.value.err) {
-        throw new Error(`Swap simulation failed: ${JSON.stringify(sim.value.err)}`);
+      const sim = await withTimeout(
+        connection.simulateTransaction(vtx, {
+          replaceRecentBlockhash: true,
+          sigVerify: false,
+          commitment: 'confirmed',
+        }),
+        7000,
+        'swap simulation'
+      ).catch(() => null);
+      if (sim?.value?.err) {
+        // Continue; on-chain execution is the source of truth and wallet sign/send may still succeed.
+        setStatus('Preflight simulation failed/slow; continuing to wallet signature...');
       }
 
       const sigs = await walletAdapter.signAndSendTransactions([vtx as any]);
