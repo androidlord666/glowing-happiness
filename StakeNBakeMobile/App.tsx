@@ -68,7 +68,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.41 (code 52)';
+const APP_VERSION_LABEL = 'v2.42 (code 53)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
