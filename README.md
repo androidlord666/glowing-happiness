@@ -1,10 +1,10 @@
-# stakeNbake
+# Staking with Solana Mobile 
 
 Solana Mobile dApp for consolidating stake accounts (up to 25 source stake accounts into 1 destination stake account), with a minimalist dark Solana-themed UI.
 
 ## Project layout
 
-- `StakeNBakeMobile/` → React Native Android/iOS app (main app)
+- `Staking with Solana Mobile/` → React Native Android/iOS app (main app)
 - root files are legacy scaffold notes from earlier MVP pass
 
 ## Current shipped features
@@ -14,7 +14,7 @@ Solana Mobile dApp for consolidating stake accounts (up to 25 source stake accou
 - Send flow (build transfer tx + sign/send via wallet adapter interface)
 - Receive flow (open wallet address in Solana explorer)
 - Stake account discovery
-- Select up to 25 source stake accounts
+- Select up to 99 source stake accounts
 - Consolidation transaction builder:
   - delegate destination to validator vote account
   - merge selected source stake accounts into destination
