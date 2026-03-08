@@ -143,17 +143,30 @@ function hasWithdrawableLamports(lamports?: number): boolean {
   return Number(lamports ?? 0) > STAKE_RENT_RESERVE_LAMPORTS;
 }
 
-function isMergeStateCompatible(destinationState?: string, sourceState?: string): boolean {
-  const dest = presentStakeState(destinationState);
-  const source = presentStakeState(sourceState);
-  if (dest === 'syncing' || source === 'syncing') return true;
-  const destDelegated = isDelegatedState(dest);
-  const sourceDelegated = isDelegatedState(source);
-  if (destDelegated !== sourceDelegated) return false;
-  if (!destDelegated) {
-    return source === 'undelegated' || source === 'inactive';
+function isMergeStateCompatible(destinationMeta?: StakeParsedMeta | StakeAccountInfo | null, sourceMeta?: StakeParsedMeta | StakeAccountInfo | null): boolean {
+  const destState = presentStakeState((destinationMeta as any)?.delegationState ?? (destinationMeta as any)?.stakeState);
+  const sourceState = presentStakeState((sourceMeta as any)?.delegationState ?? (sourceMeta as any)?.stakeState);
+  const destType = String((destinationMeta as any)?.stakeType ?? '').toLowerCase();
+  const sourceType = String((sourceMeta as any)?.stakeType ?? '').toLowerCase();
+  const destVote = String((destinationMeta as any)?.delegationVote ?? '');
+  const sourceVote = String((sourceMeta as any)?.delegationVote ?? '');
+
+  // Avoid sending borderline/unknown state pairs that usually fail simulation.
+  if (destState === 'syncing' || sourceState === 'syncing') return false;
+
+  // Consolidation supports delegated stake merges. Initialized/undelegated stake
+  // accounts are excluded from merge candidates for reliability.
+  if (destType !== 'delegated' || sourceType !== 'delegated') return false;
+
+  // If either side is inactive, both must be inactive delegated stake.
+  if (destState === 'inactive' || sourceState === 'inactive') {
+    if (destState !== 'inactive' || sourceState !== 'inactive') return false;
   }
-  return source === 'delegated' || source === 'active' || source === 'activating' || source === 'deactivating';
+
+  // Delegate/voter must match for a merge to be accepted.
+  if (!destVote || !sourceVote || destVote !== sourceVote) return false;
+
+  return true;
 }
 
 function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): string {
@@ -193,6 +206,7 @@ async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 4
 type StakeParsedMeta = {
   delegationVote?: string;
   delegationState?: string;
+  stakeType?: string;
 };
 
 const U64_MAX_EPOCH = BigInt('18446744073709551615');
@@ -449,6 +463,10 @@ export default function App() {
   const selectedCount = sourceSelectedKeys.length;
   const validatorVote = VALIDATOR_VOTE_BY_CLUSTER[cluster];
   const canConsolidate = !busy && !!destination && selectedCount > 0 && selectedCount <= MAX_SOURCE_ACCOUNTS;
+  const destinationAccountMeta = useMemo(
+    () => stakeAccounts.find((a) => a.pubkey === destination) ?? null,
+    [stakeAccounts, destination]
+  );
   const destinationState = presentStakeState(stakeAccounts.find((a) => a.pubkey === destination)?.stakeState);
   const withdrawReadyAccounts = useMemo(
     () =>
@@ -535,15 +553,15 @@ export default function App() {
   const allFilteredSelected = useMemo(() => {
     if (!filteredSourceStakeAccounts.length) return false;
     const subset = filteredSourceStakeAccounts.slice(0, MAX_SOURCE_ACCOUNTS);
-    const compatible = subset.filter((a) => isMergeStateCompatible(destinationState, a.stakeState));
+    const compatible = subset.filter((a) => isMergeStateCompatible(destinationAccountMeta, a));
     if (!compatible.length) return false;
     return compatible.every((a) => !!selected[a.pubkey]);
-  }, [filteredSourceStakeAccounts, selected, destinationState]);
+  }, [filteredSourceStakeAccounts, selected, destinationAccountMeta]);
 
   const selectAllValidSources = () => {
     const subset = filteredSourceStakeAccounts
       .slice(0, MAX_SOURCE_ACCOUNTS)
-      .filter((a) => isMergeStateCompatible(destinationState, a.stakeState));
+      .filter((a) => isMergeStateCompatible(destinationAccountMeta, a));
     if (allFilteredSelected) {
       const next = { ...selected };
       for (const a of subset) delete next[a.pubkey];
@@ -901,17 +919,13 @@ export default function App() {
       const stakeMap = new Map(stakeAccounts.map((a) => [a.pubkey, a] as const));
       const destinationAccount = stakeMap.get(destination);
       if (!destinationAccount) throw new Error('Destination stake account not found in current list. Refresh and try again.');
-      const destMeta: StakeParsedMeta = {
-        delegationVote: destinationAccount.delegationVote,
-        delegationState: destinationAccount.stakeState,
-      };
       const incompatibleCount = sourceSelectedKeys.filter((k) => {
         const src = stakeMap.get(k);
-        return !isMergeStateCompatible(destMeta.delegationState, src?.stakeState);
+        return !isMergeStateCompatible(destinationAccount, src);
       }).length;
       const eligibleSourceKeys = sourceSelectedKeys.filter((k) => {
         const src = stakeMap.get(k);
-        return isMergeStateCompatible(destMeta.delegationState, src?.stakeState);
+        return isMergeStateCompatible(destinationAccount, src);
       });
       if (eligibleSourceKeys.length === 0) {
         suppressNextStatusModalRef.current = true;
@@ -1601,7 +1615,7 @@ export default function App() {
               windowSize={7}
               renderItem={({ item: a }) => {
                 const checked = !!selected[a.pubkey];
-                const compatible = isMergeStateCompatible(destinationState, a.stakeState);
+                const compatible = isMergeStateCompatible(destinationAccountMeta, a);
                 return (
                   <Text
                     style={[
