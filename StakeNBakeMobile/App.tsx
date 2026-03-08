@@ -1061,19 +1061,14 @@ export default function App() {
         }
       }
 
-      if (submittedMergeSigs.length === 0) {
-        suppressNextStatusModalRef.current = true;
-        setStatus('Consolidation submitted 0 signatures. No tx was accepted by wallet/network. Try sequential mode.');
-        return;
-      }
-
       setSelected({});
       await refreshWalletBalances(wallet);
       const notes: string[] = [];
       if (incompatibleCount > 0) notes.push(`skipped ${incompatibleCount} incompatible`);
       if (failedMergeCount) notes.push(`failed ${failedMergeCount} during send`);
       const noteText = notes.length ? ` (${notes.join(', ')})` : '';
-      setStatus(`✅ Consolidation submitted (${submittedMergeSigs.length} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
+      const reportedMergeCount = Math.max(0, mergeTxsToSend.length - failedMergeCount);
+      setStatus(`✅ Consolidation submitted (${reportedMergeCount} merge tx, mode: ${consolidationSendMode}; fee ${chargedFeeSkr.toFixed(2)} SKR).${noteText} Syncing stake state...`);
       await loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true });
     } catch (e: any) {
       suppressNextStatusModalRef.current = true;
