@@ -65,7 +65,9 @@ const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
 const PLATFORM_FEE_PER_SOURCE_SKR = 10;
 const PLATFORM_FEE_CAP_SKR = 100;
-const MAX_BATCH_TX_PER_REQUEST = 12;
+// Solana Mobile Wallet Adapter payload limits vary by wallet/runtime.
+// Keep batch requests small for high reliability; 99-source runs are still supported via chunking.
+const MAX_BATCH_TX_PER_REQUEST = 3;
 const STAKE_RENT_RESERVE_LAMPORTS = 2_282_880;
 
 function shortAddr(v: string) {
