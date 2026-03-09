@@ -59,6 +59,7 @@ type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
+type SkrConfirmAction = 'stake' | 'unstake';
 type TxLifecycleStage = 'prepared' | 'sign_requested' | 'submitted' | 'confirmed' | 'failed';
 type ConsolidationBatchChunkSize = 2 | 3 | 4;
 
@@ -343,6 +344,8 @@ export default function App() {
   const [skrStakeAmount, setSkrStakeAmount] = useState('10');
   const [skrStakeBusy, setSkrStakeBusy] = useState(false);
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
+  const [skrConfirmAction, setSkrConfirmAction] = useState<SkrConfirmAction>('stake');
+  const [showSkrTxConfirm, setShowSkrTxConfirm] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [consolidateBusy, setConsolidateBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
@@ -385,6 +388,17 @@ export default function App() {
   const explorerLabel = explorer === 'orbmarkets' ? 'OrbMarkets.io' : explorer === 'solscan' ? 'Solscan.io' : 'Explorer.Solana.com';
   const anyActionBusy =
     connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy || skrStakeBusy || skrUnstakeBusy;
+
+  const parsedSkrBalance = useMemo(() => Number(String(walletSkrBalance).replace(/,/g, '')), [walletSkrBalance]);
+  const parsedSkrAmount = useMemo(() => Number(skrStakeAmount), [skrStakeAmount]);
+  const skrBalanceAfterStake = useMemo(() => {
+    if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
+    return Math.max(0, parsedSkrBalance - Math.max(0, parsedSkrAmount)).toFixed(4);
+  }, [parsedSkrBalance, parsedSkrAmount]);
+  const skrBalanceAfterUnstake = useMemo(() => {
+    if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
+    return (parsedSkrBalance + Math.max(0, parsedSkrAmount)).toFixed(4);
+  }, [parsedSkrBalance, parsedSkrAmount]);
 
   const connection = useMemo(() => createConnection(cluster), [cluster]);
 
@@ -2430,9 +2444,27 @@ export default function App() {
                 onChangeText={setSkrStakeAmount}
                 keyboardType="decimal-pad"
               />
+              <View style={styles.skrQuickRow}>
+                <Pressable
+                  onPress={() => {
+                    if (!Number.isFinite(parsedSkrBalance)) return;
+                    setSkrStakeAmount(parsedSkrBalance.toFixed(4));
+                  }}
+                  disabled={!Number.isFinite(parsedSkrBalance)}
+                  style={({ pressed }) => [styles.skrQuickBtn, (pressed || !Number.isFinite(parsedSkrBalance)) && styles.skrQuickBtnPressed]}
+                >
+                  <Text style={styles.skrQuickBtnText}>Max</Text>
+                </Pressable>
+                <Text style={styles.meta}>Wallet SKR: {walletSkrBalance}</Text>
+              </View>
+              <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
+              <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
               <View style={styles.skrActionRow}>
                 <Pressable
-                  onPress={onStakeSkr}
+                  onPress={() => {
+                    setSkrConfirmAction('stake');
+                    setShowSkrTxConfirm(true);
+                  }}
                   disabled={skrStakeBusy || !wallet}
                   style={({ pressed }) => [
                     styles.skrActionBtn,
@@ -2442,7 +2474,10 @@ export default function App() {
                   <Text style={styles.skrActionBtnText}>{skrStakeBusy ? 'Staking…' : 'Stake SKR'}</Text>
                 </Pressable>
                 <Pressable
-                  onPress={onUnstakeSkr}
+                  onPress={() => {
+                    setSkrConfirmAction('unstake');
+                    setShowSkrTxConfirm(true);
+                  }}
                   disabled={skrUnstakeBusy || !wallet}
                   style={({ pressed }) => [
                     styles.skrActionBtn,
@@ -2455,6 +2490,35 @@ export default function App() {
               <Pressable onPress={() => setShowSkrStaking(false)} style={styles.skrCloseBtn}>
                 <Text style={styles.skrCloseBtnText}>Close</Text>
               </Pressable>
+            </View>
+          </View>
+        )}
+
+        {showSkrTxConfirm && showSkrStaking && (
+          <View style={styles.confirmOverlay}>
+            <View style={styles.confirmCard}>
+              <Text style={styles.label}>Confirm {skrConfirmAction === 'stake' ? 'Stake' : 'Unstake'}</Text>
+              <Text style={styles.meta}>Amount: {skrStakeAmount || '0'} SKR</Text>
+              <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
+              <Text style={styles.meta}>Staking account: {shortAddr(SKR_STAKING_ACCOUNT)}</Text>
+              <Text style={styles.meta}>
+                Estimated wallet SKR after {skrConfirmAction}: {skrConfirmAction === 'stake' ? skrBalanceAfterStake : skrBalanceAfterUnstake}
+              </Text>
+              <View style={styles.row}>
+                <ActionButton label="Cancel" onPress={() => setShowSkrTxConfirm(false)} />
+                <ActionButton
+                  label={skrConfirmAction === 'stake' ? 'Confirm Stake' : 'Confirm Unstake'}
+                  onPress={async () => {
+                    setShowSkrTxConfirm(false);
+                    if (skrConfirmAction === 'stake') {
+                      await onStakeSkr();
+                    } else {
+                      await onUnstakeSkr();
+                    }
+                  }}
+                  disabled={skrStakeBusy || skrUnstakeBusy}
+                />
+              </View>
             </View>
           </View>
         )}
@@ -2730,6 +2794,29 @@ const styles = StyleSheet.create({
   skrActionRow: {
     flexDirection: 'row',
     gap: 8,
+  },
+  skrQuickRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  skrQuickBtn: {
+    borderWidth: 1,
+    borderColor: '#2CBFC0',
+    borderRadius: 8,
+    backgroundColor: '#0C3E4A',
+    paddingVertical: 6,
+    paddingHorizontal: 12,
+  },
+  skrQuickBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  skrQuickBtnText: {
+    color: '#9AF5F2',
+    fontWeight: '700',
+    fontSize: 12,
   },
   skrActionBtn: {
     flex: 1,
