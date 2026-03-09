@@ -2608,6 +2608,11 @@ export default function App() {
         {showSkrStaking && (
           <View style={styles.confirmOverlay}>
             <View style={styles.skrStakeCard}>
+              <ScrollView
+                style={styles.skrStakeScroll}
+                contentContainerStyle={styles.skrStakeScrollContent}
+                showsVerticalScrollIndicator={false}
+              >
               <View style={styles.skrTitleRow}>
                 <Text style={styles.skrStakeTitle}>SKR Staking (Official)</Text>
                 <Pressable
@@ -2721,6 +2726,7 @@ export default function App() {
               <Pressable onPress={() => setShowSkrStaking(false)} style={styles.skrCloseBtn}>
                 <Text style={styles.skrCloseBtnText}>Close</Text>
               </Pressable>
+              </ScrollView>
             </View>
           </View>
         )}
@@ -3029,11 +3035,19 @@ const styles = StyleSheet.create({
   skrStakeCard: {
     width: '100%',
     maxWidth: 420,
+    maxHeight: '86%',
     backgroundColor: '#071E25',
     borderColor: '#2CBFC0',
     borderWidth: 1,
     borderRadius: 14,
     padding: 14,
+    gap: 10,
+  },
+  skrStakeScroll: {
+    width: '100%',
+  },
+  skrStakeScrollContent: {
+    paddingBottom: 4,
     gap: 10,
   },
   skrStakeTitle: {
