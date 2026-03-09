@@ -51,8 +51,8 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
   private address: string | null = null;
   private authToken: string | null = null;
   private readonly appIdentity = {
-    name: 'stakeNbake',
-    uri: 'https://github.com/rasetsutekka/stakeNbake',
+    name: 'Staking with Solana Mobile',
+    uri: 'https://github.com/androidlord666/glowing-happiness',
     icon: 'favicon.ico',
   };
 

@@ -133,7 +133,7 @@ export default function App() {
     <SafeAreaView style={styles.root}>
       <StatusBar barStyle="light-content" />
       <ScrollView contentContainerStyle={styles.content}>
-        <Text style={styles.title}>stakeNbake</Text>
+        <Text style={styles.title}>Staking with Solana Mobile</Text>
         <Text style={styles.subtitle}>Consolidate up to 25 stake accounts into 1 · {CLUSTER}</Text>
 
         <View style={styles.card}>

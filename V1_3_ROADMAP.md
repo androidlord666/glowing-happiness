@@ -1,4 +1,4 @@
-# stakeNbake v1.3 Roadmap (Post-Launch Hardening)
+# Staking with Solana Mobile v1.3 Roadmap (Post-Launch Hardening)
 
 ## Goal
 Improve reliability and supportability without changing core user flow.

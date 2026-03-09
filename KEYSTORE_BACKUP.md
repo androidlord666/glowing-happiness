@@ -1,4 +1,4 @@
-# Keystore Backup & Recovery (StakeNBake)
+# Keystore Backup & Recovery (Staking with Solana Mobile)
 
 Keep this safe. Without the same keystore + alias + passwords, you cannot publish updates to the same app id.
 
@@ -20,8 +20,8 @@ keytool -list -v -keystore ~/keystore/upload-keystore.jks
 
 ```bash
 termux-setup-storage
-mkdir -p /storage/emulated/0/Download/stakeNbake-keystore
-cp -v ~/keystore/upload-keystore.jks /storage/emulated/0/Download/stakeNbake-keystore/
+mkdir -p /storage/emulated/0/Download/staking-with-solana-mobile-keystore
+cp -v ~/keystore/upload-keystore.jks /storage/emulated/0/Download/staking-with-solana-mobile-keystore/
 ```
 
 ## GitHub Actions secrets required

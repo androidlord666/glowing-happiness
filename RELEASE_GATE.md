@@ -1,4 +1,4 @@
-# RELEASE_GATE.md — Production Release Gate (stakeNbake)
+# RELEASE_GATE.md — Production Release Gate (Staking with Solana Mobile)
 
 This app is live. Treat every upload as production-critical.
 

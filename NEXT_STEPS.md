@@ -1,4 +1,4 @@
-# stakeNbake — Proactive Execution Plan
+# Staking with Solana Mobile — Proactive Execution Plan
 
 ## Immediate next milestones (in order)
 

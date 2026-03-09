@@ -76,7 +76,7 @@ jobs:
         run: |
           mkdir -p artifacts
           {
-            echo "StakeNBake Android Release"
+            echo "Staking with Solana Mobile Android Release"
             echo "Repository: $GITHUB_REPOSITORY"
             echo "Workflow Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Commit: $GITHUB_SHA"

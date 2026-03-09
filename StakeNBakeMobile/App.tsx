@@ -93,8 +93,8 @@ const PLATFORM_FEE_CAP_SKR = 100;
 // Keep batch requests small for high reliability; 99-source runs are still supported via chunking.
 const DEFAULT_BATCH_TX_PER_REQUEST: ConsolidationBatchChunkSize = 3;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
-const TX_LIFECYCLE_STORAGE_KEY = '@stakeNbake:txLifecycleEvents:v1';
-const STAKE_SNAPSHOT_CACHE_PREFIX = '@stakeNbake:stakeSnapshot:v1';
+const TX_LIFECYCLE_STORAGE_KEY = '@staking_with_solana_mobile:txLifecycleEvents:v1';
+const STAKE_SNAPSHOT_CACHE_PREFIX = '@staking_with_solana_mobile:stakeSnapshot:v1';
 
 function getStakeSnapshotCacheKey(cluster: ClusterName, wallet: string): string {
   return `${STAKE_SNAPSHOT_CACHE_PREFIX}:${cluster}:${wallet}`;
@@ -1860,7 +1860,7 @@ export default function App() {
       : null;
 
     const report = {
-      app: 'stakeNbake',
+      app: 'Staking with Solana Mobile',
       version: APP_VERSION_LABEL,
       cluster,
       explorer,
@@ -1886,7 +1886,7 @@ export default function App() {
 
   const copySupportBundle = () => {
     const payload = {
-      app: 'stakeNbake',
+      app: 'Staking with Solana Mobile',
       version: APP_VERSION_LABEL,
       features: {
         feeEnabled: FEATURE_FEE_ENABLED,
@@ -1915,7 +1915,7 @@ export default function App() {
 
   const copyTxLifecycleReport = () => {
     const payload = {
-      app: 'stakeNbake',
+      app: 'Staking with Solana Mobile',
       version: APP_VERSION_LABEL,
       timestamp: new Date().toISOString(),
       events: txLifecycleEvents,
@@ -1927,7 +1927,7 @@ export default function App() {
   const exportLogsToShare = async () => {
     try {
       const payload = {
-        app: 'stakeNbake',
+        app: 'Staking with Solana Mobile',
         version: APP_VERSION_LABEL,
         cluster,
         explorer,
@@ -1940,7 +1940,7 @@ export default function App() {
       const body = JSON.stringify(payload, null, 2);
       const encoded = Buffer.from(body, 'utf8').toString('base64');
       await Share.share({
-        title: 'stakeNbake-logs.json',
+        title: 'staking-with-solana-mobile-logs.json',
         message: body,
         url: `data:application/json;base64,${encoded}`,
       });

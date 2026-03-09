@@ -53,7 +53,7 @@ jobs:
       - name: Upload debug APK artifact
         uses: actions/upload-artifact@v4
         with:
-          name: stakeNbake-debug-apk
+          name: staking-with-solana-mobile-debug-apk
           path: StakeNBakeMobile/android/app/build/outputs/apk/debug/app-debug.apk
 
       - name: Generate CI changelog
@@ -61,7 +61,7 @@ jobs:
         run: |
           mkdir -p artifacts
           {
-            echo "StakeNBake Mobile CI Build"
+            echo "Staking with Solana Mobile CI Build"
             echo "Repository: $GITHUB_REPOSITORY"
             echo "Workflow Run: $GITHUB_SERVER_URL/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID"
             echo "Commit: $GITHUB_SHA"

@@ -32,7 +32,7 @@ Tag every shipped build:
 
 Commands:
 ```bash
-git tag -a v1.8+code9 -m "stakeNbake release v1.8 (code 9)"
+git tag -a v1.8+code9 -m "Staking with Solana Mobile release v1.8 (code 9)"
 git push origin v1.8+code9
 ```
 
