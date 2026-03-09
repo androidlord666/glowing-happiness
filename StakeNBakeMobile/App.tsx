@@ -37,7 +37,7 @@ import {
 } from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
-import { APP_NAME, ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, RPC_URLS, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
+import { APP_NAME, ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, RPC_FALLBACK_URLS, RPC_URLS, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
 import { addressUrl, txUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
@@ -874,9 +874,10 @@ export default function App() {
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
       setStatus('Checking SKR funding...');
+      const skrRpc = new Connection(RPC_FALLBACK_URLS[cluster]?.[0] ?? RPC_URLS[cluster], 'confirmed');
 
       const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-      const mintAccounts = await connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+      const mintAccounts = await skrRpc.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
       const accountRows = mintAccounts.value.map((row) => {
         const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
         return {
@@ -895,7 +896,7 @@ export default function App() {
       if (neededForAta > 0n) {
         setStatus('Preparing SKR funding account...');
         const prepTx = new Transaction();
-        const recent = await connection.getLatestBlockhash('confirmed');
+        const recent = await skrRpc.getLatestBlockhash('confirmed');
         prepTx.recentBlockhash = recent.blockhash;
         prepTx.lastValidBlockHeight = recent.lastValidBlockHeight;
         prepTx.feePayer = owner;
@@ -920,8 +921,7 @@ export default function App() {
         rememberTx(prepSig);
         trackPendingTx(prepSig, 'SKR funding transfer');
         setStatus(`Preparing SKR funding (${shortAddr(prepSig)})...`);
-        await connection.confirmTransaction(prepSig, 'confirmed').catch(() => null);
-        await refreshWalletBalances(wallet);
+        await skrRpc.confirmTransaction(prepSig, 'confirmed').catch(() => null);
       }
 
       setStatus('Building official SKR stake transaction...');
@@ -936,14 +936,23 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
       if (!sig) {
+        suppressNextStatusModalRef.current = true;
         setStatus('Official SKR stake submitted in wallet. Signature unavailable; refresh shortly.');
-        await refreshWalletBalances(wallet);
-        await refreshStakedSkrBalance();
+        setTimeout(() => {
+          refreshWalletBalances(wallet).catch(() => {});
+          refreshStakedSkrBalance().catch(() => {});
+        }, 1500);
         return;
       }
       rememberTx(sig);
       trackPendingTx(sig, 'Official SKR stake');
-      await refreshWalletBalances(wallet);
+      try {
+        const currentWalletRaw = BigInt(uiAmountToRaw(walletSkrBalance, decimals));
+        const nextWalletRaw = currentWalletRaw > stakeRaw ? currentWalletRaw - stakeRaw : 0n;
+        setWalletSkrBalance(formatRawAmount(nextWalletRaw.toString(), decimals, 6));
+      } catch {
+        // keep last-known wallet balance if optimistic update fails
+      }
       if (Number.isFinite(parsedStakedSkrBalance)) {
         setStakedSkrBalance((parsedStakedSkrBalance + amount).toFixed(6));
       } else {
@@ -951,13 +960,18 @@ export default function App() {
       }
       setStatus(`✅ Official SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
-      refreshStakedSkrBalance().catch(() => {});
+      setTimeout(() => {
+        refreshWalletBalances(wallet).catch(() => {});
+        refreshStakedSkrBalance().catch(() => {});
+      }, 1500);
     } catch (e: any) {
       if (isEmptySignatureError(e)) {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR stake submitted. Wallet returned no signature; refresh in a few seconds.');
-        refreshWalletBalances(wallet).catch(() => {});
-        refreshStakedSkrBalance().catch(() => {});
+        setTimeout(() => {
+          refreshWalletBalances(wallet).catch(() => {});
+          refreshStakedSkrBalance().catch(() => {});
+        }, 1500);
         return;
       }
       if (classifyError(e) === 'rpc') {
