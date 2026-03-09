@@ -358,6 +358,7 @@ export default function App() {
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [showTips, setShowTips] = useState(false);
   const [showStatusModal, setShowStatusModal] = useState(false);
+  const [skrErrorDetail, setSkrErrorDetail] = useState('');
   const suppressNextStatusModalRef = useRef(false);
   const [pullRefreshing, setPullRefreshing] = useState(false);
   const [isAppActive, setIsAppActive] = useState(true);
@@ -754,6 +755,7 @@ export default function App() {
       if (raw <= 0n) throw new Error('Amount too small');
 
       setSkrStakeBusy(true);
+      setSkrErrorDetail('');
       setStatus('Submitting SKR stake transfer...');
 
       const ownerPk = asPublicKey(wallet);
@@ -799,6 +801,7 @@ export default function App() {
       setStatus(`✅ SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
     } catch (e: any) {
+      setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR stake error', e));
     } finally {
       setSkrStakeBusy(false);
@@ -817,6 +820,7 @@ export default function App() {
       if (raw <= 0n) throw new Error('Amount too small');
 
       setSkrUnstakeBusy(true);
+      setSkrErrorDetail('');
       setStatus('Submitting SKR unstake transfer...');
 
       const ownerPk = asPublicKey(wallet);
@@ -854,6 +858,7 @@ export default function App() {
       setStatus(`✅ SKR unstaked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
     } catch (e: any) {
+      setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR unstake error', e));
     } finally {
       setSkrUnstakeBusy(false);
@@ -2595,7 +2600,17 @@ export default function App() {
           <View style={styles.confirmCard}>
             <Text style={styles.label}>Notice</Text>
             <Text style={styles.meta}>{status}</Text>
-            <ActionButton label="OK" onPress={() => { setShowStatusModal(false); setStatus(''); }} />
+            {!!skrErrorDetail && status.toLowerCase().includes('skr') && (
+              <Text style={styles.meta}>Raw detail: {skrErrorDetail}</Text>
+            )}
+            <ActionButton
+              label="OK"
+              onPress={() => {
+                setShowStatusModal(false);
+                setStatus('');
+                setSkrErrorDetail('');
+              }}
+            />
           </View>
           </View>
         )}
