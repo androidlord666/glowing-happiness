@@ -1196,6 +1196,7 @@ export default function App() {
       return;
     }
     setSkrVaultAddress('stake.solanamobile.com');
+    refreshWalletBalances(wallet).catch(() => {});
     refreshStakedSkrBalance().catch(() => {});
     fetchOfficialCurrentApy()
       .then((apy) => {
@@ -1203,7 +1204,7 @@ export default function App() {
         setSkrApyPct((apy * 100).toFixed(2));
       })
       .catch(() => {});
-  }, [wallet, showSkrStaking, refreshStakedSkrBalance]);
+  }, [wallet, showSkrStaking, refreshStakedSkrBalance, refreshWalletBalances]);
 
   useEffect(() => {
     if (!wallet) return;
