@@ -477,6 +477,14 @@ export default function App() {
   const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrStakeAmountTooHigh;
   const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && pendingUnstakeRawBig === 0n && skrAmountIsValid && !skrUnstakeAmountTooHigh;
   const canSubmitSkrWithdraw = !!wallet && !skrSubmitLock && pendingUnstakeRawBig > 0n && unstakeCooldownReady;
+  const stakedSkrDisplay = useMemo(
+    () => (stakedSkrBalance === '—' ? (skrRefreshBusy ? 'Refreshing...' : 'Loading...') : `${stakedSkrBalance} SKR`),
+    [stakedSkrBalance, skrRefreshBusy]
+  );
+  const pendingSkrDisplay = useMemo(
+    () => `${pendingUnstakeUi} SKR`,
+    [pendingUnstakeUi]
+  );
   const skrBalanceAfterStake = useMemo(() => {
     if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
     return Math.max(0, parsedSkrBalance - Math.max(0, parsedSkrAmount)).toFixed(4);
@@ -2610,6 +2618,20 @@ export default function App() {
               </View>
               <Text style={styles.meta}>Source: {skrVaultAddress}</Text>
               <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
+              <View style={styles.skrBalancesBlock}>
+                <View style={styles.skrBalanceCell}>
+                  <Text style={styles.skrBalanceLabel}>Wallet SKR</Text>
+                  <Text style={styles.skrBalanceValue}>{walletSkrBalance} SKR</Text>
+                </View>
+                <View style={styles.skrBalanceCell}>
+                  <Text style={styles.skrBalanceLabel}>Staked SKR</Text>
+                  <Text style={styles.skrBalanceValue}>{stakedSkrDisplay}</Text>
+                </View>
+                <View style={styles.skrBalanceCell}>
+                  <Text style={styles.skrBalanceLabel}>Pending Unstake</Text>
+                  <Text style={styles.skrBalanceValue}>{pendingSkrDisplay}</Text>
+                </View>
+              </View>
               <TextInput
                 style={[styles.input, styles.skrInput]}
                 placeholder="Amount SKR"
@@ -2629,10 +2651,7 @@ export default function App() {
                 >
                   <Text style={styles.skrQuickBtnText}>Max</Text>
                 </Pressable>
-                <Text style={styles.meta}>Wallet SKR: {walletSkrBalance}</Text>
               </View>
-              <Text style={styles.meta}>Staked SKR: {stakedSkrBalance}</Text>
-              <Text style={styles.meta}>Pending Unstake: {pendingUnstakeUi} SKR</Text>
               <Text style={styles.meta}>
                 Cooldown: {skrUnstakeUnlockAtSec ? (unstakeCooldownReady ? 'Ready to withdraw' : formatCountdown(unstakeCooldownRemainingSec)) : 'No active cooldown'}
               </Text>
@@ -3032,6 +3051,29 @@ const styles = StyleSheet.create({
     color: '#9AF5F2',
     fontWeight: '800',
     fontSize: 14,
+  },
+  skrBalancesBlock: {
+    borderWidth: 1,
+    borderColor: '#2CBFC0',
+    borderRadius: 10,
+    backgroundColor: '#0B2A34',
+    padding: 10,
+    gap: 8,
+  },
+  skrBalanceCell: {
+    gap: 2,
+  },
+  skrBalanceLabel: {
+    color: '#8ED7D6',
+    fontSize: 11,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+    textTransform: 'uppercase',
+  },
+  skrBalanceValue: {
+    color: '#D9FBFA',
+    fontSize: 16,
+    fontWeight: '800',
   },
   skrInput: {
     backgroundColor: '#0B2A34',
