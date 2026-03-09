@@ -776,25 +776,31 @@ export default function App() {
         setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
       }
 
-      const confirmedRaw = await (async () => {
+      const confirmedRaw = await (async (): Promise<bigint | null> => {
         try {
           const rows = await connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
           return sumParsedTokenRows(rows?.value ?? []);
         } catch {
-          return 0n;
+          return null;
         }
       })();
-      const primaryRaw = await (async () => {
+      const primaryRaw = await (async (): Promise<bigint | null> => {
         try {
           const canonicalConn = new Connection(RPC_URLS[cluster], 'confirmed');
           const canonical = await canonicalConn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
           return sumParsedTokenRows(canonical?.value ?? []);
         } catch {
-          return 0n;
+          return null;
         }
       })();
-      const stableRaw = [confirmedRaw, primaryRaw, previousRaw].reduce((max, value) => (value > max ? value : max), 0n);
-      setWalletSkrBalance(formatRawAmount(stableRaw.toString(), decimals, 6));
+      const queriedValues = [confirmedRaw, primaryRaw].filter((value): value is bigint => value !== null);
+      const maxQueriedRaw = queriedValues.reduce((max, value) => (value > max ? value : max), 0n);
+      const nextRaw = maxQueriedRaw > previousRaw ? maxQueriedRaw : previousRaw;
+
+      // Never downgrade to a transient zero/partial read during refresh.
+      if (nextRaw > 0n || (queriedValues.length > 0 && previousRaw === 0n)) {
+        setWalletSkrBalance(formatRawAmount(nextRaw.toString(), decimals, 6));
+      }
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
     }
