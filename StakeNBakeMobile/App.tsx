@@ -475,11 +475,7 @@ export default function App() {
     () => Number.isFinite(parsedSkrAmount) && parsedSkrAmount > 0,
     [parsedSkrAmount]
   );
-  const skrStakeAmountTooHigh = useMemo(
-    () => Number.isFinite(parsedSkrBalance) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedSkrBalance,
-    [parsedSkrBalance, parsedSkrAmount]
-  );
-  const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrStakeAmountTooHigh;
+  const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid;
   const stakedSkrDisplay = useMemo(
     () => (stakedSkrBalance === '—' ? (skrRefreshBusy ? 'Refreshing...' : 'Loading...') : `${stakedSkrBalance} SKR`),
     [stakedSkrBalance, skrRefreshBusy]
@@ -869,9 +865,6 @@ export default function App() {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
-      if (Number.isFinite(parsedSkrBalance) && amount > parsedSkrBalance) {
-        throw new Error(`Stake amount exceeds wallet balance (${walletSkrBalance} SKR).`);
-      }
 
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
