@@ -1151,11 +1151,10 @@ export default function App() {
   useEffect(() => {
     if (!wallet || !isAppActive) return;
     const t = setInterval(() => {
-      refreshWalletBalances(wallet).catch(() => {});
       if (showSkrStaking) refreshStakedSkrBalance().catch(() => {});
     }, 12000);
     return () => clearInterval(t);
-  }, [wallet, isAppActive, refreshWalletBalances, refreshStakedSkrBalance, showSkrStaking]);
+  }, [wallet, isAppActive, refreshStakedSkrBalance, showSkrStaking]);
 
   useEffect(() => {
     if (!wallet) {
