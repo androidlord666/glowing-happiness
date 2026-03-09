@@ -348,6 +348,7 @@ export default function App() {
   const [skrStakeAmount, setSkrStakeAmount] = useState('10');
   const [skrStakeBusy, setSkrStakeBusy] = useState(false);
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
+  const [skrSubmitLock, setSkrSubmitLock] = useState(false);
   const [skrConfirmAction, setSkrConfirmAction] = useState<SkrConfirmAction>('stake');
   const [showSkrTxConfirm, setShowSkrTxConfirm] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
@@ -397,7 +398,22 @@ export default function App() {
     connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy || skrStakeBusy || skrUnstakeBusy;
 
   const parsedSkrBalance = useMemo(() => Number(String(walletSkrBalance).replace(/,/g, '')), [walletSkrBalance]);
+  const parsedStakedSkrBalance = useMemo(() => Number(String(stakedSkrBalance).replace(/,/g, '')), [stakedSkrBalance]);
   const parsedSkrAmount = useMemo(() => Number(skrStakeAmount), [skrStakeAmount]);
+  const skrAmountIsValid = useMemo(
+    () => Number.isFinite(parsedSkrAmount) && parsedSkrAmount > 0,
+    [parsedSkrAmount]
+  );
+  const skrStakeAmountTooHigh = useMemo(
+    () => Number.isFinite(parsedSkrBalance) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedSkrBalance,
+    [parsedSkrBalance, parsedSkrAmount]
+  );
+  const skrUnstakeAmountTooHigh = useMemo(
+    () => Number.isFinite(parsedStakedSkrBalance) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedStakedSkrBalance,
+    [parsedStakedSkrBalance, parsedSkrAmount]
+  );
+  const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrStakeAmountTooHigh;
+  const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrUnstakeAmountTooHigh;
   const skrBalanceAfterStake = useMemo(() => {
     if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
     return Math.max(0, parsedSkrBalance - Math.max(0, parsedSkrAmount)).toFixed(4);
@@ -778,11 +794,15 @@ export default function App() {
   }, [connection, resolveUserSkrVaultAccount, wallet]);
 
   const onStakeSkr = async () => {
-    if (skrStakeBusy) return;
+    if (skrStakeBusy || skrSubmitLock) return;
+    setSkrSubmitLock(true);
     try {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
+      if (Number.isFinite(parsedSkrBalance) && amount > parsedSkrBalance) {
+        throw new Error(`Stake amount exceeds wallet balance (${walletSkrBalance} SKR).`);
+      }
 
       const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
       const raw = BigInt(Math.round(amount * Math.pow(10, decimals)));
@@ -841,8 +861,13 @@ export default function App() {
       tx.feePayer = ownerPk;
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      const sig = sigs[0];
-      if (!sig) throw new Error('Wallet returned empty signature');
+      const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
+      if (!sig) {
+        setStatus('SKR stake submitted in wallet. Signature unavailable; refresh shortly.');
+        await refreshWalletBalances(wallet);
+        await refreshStakedSkrBalance();
+        return;
+      }
       rememberTx(sig);
       trackPendingTx(sig, 'SKR stake transfer');
       await refreshWalletBalances(wallet);
@@ -854,15 +879,20 @@ export default function App() {
       setStatus(actionError('SKR stake error', e));
     } finally {
       setSkrStakeBusy(false);
+      setSkrSubmitLock(false);
     }
   };
 
   const onUnstakeSkr = async () => {
-    if (skrUnstakeBusy) return;
+    if (skrUnstakeBusy || skrSubmitLock) return;
+    setSkrSubmitLock(true);
     try {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
+      if (Number.isFinite(parsedStakedSkrBalance) && amount > parsedStakedSkrBalance) {
+        throw new Error(`Unstake amount exceeds staked balance (${stakedSkrBalance} SKR).`);
+      }
 
       const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
       const raw = BigInt(Math.round(amount * Math.pow(10, decimals)));
@@ -897,8 +927,13 @@ export default function App() {
       tx.feePayer = ownerPk;
 
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      const sig = sigs[0];
-      if (!sig) throw new Error('Wallet returned empty signature');
+      const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
+      if (!sig) {
+        setStatus('SKR unstake submitted in wallet. Signature unavailable; refresh shortly.');
+        await refreshWalletBalances(wallet);
+        await refreshStakedSkrBalance();
+        return;
+      }
       rememberTx(sig);
       trackPendingTx(sig, 'SKR unstake transfer');
       await refreshWalletBalances(wallet);
@@ -910,6 +945,7 @@ export default function App() {
       setStatus(actionError('SKR unstake error', e));
     } finally {
       setSkrUnstakeBusy(false);
+      setSkrSubmitLock(false);
     }
   };
 
@@ -2484,18 +2520,25 @@ export default function App() {
                 <Text style={styles.meta}>Wallet SKR: {walletSkrBalance}</Text>
               </View>
               <Text style={styles.meta}>Staked SKR: {stakedSkrBalance}</Text>
+              {skrStakeAmountTooHigh && (
+                <Text style={styles.skrValidationText}>Amount exceeds Wallet SKR balance.</Text>
+              )}
+              {skrUnstakeAmountTooHigh && (
+                <Text style={styles.skrValidationText}>Amount exceeds Staked SKR balance.</Text>
+              )}
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
               <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
+              <Text style={styles.meta}>Unstake cooldown target: 48h window (UI policy note).</Text>
               <View style={styles.skrActionRow}>
                 <Pressable
                   onPress={() => {
                     setSkrConfirmAction('stake');
                     setShowSkrTxConfirm(true);
                   }}
-                  disabled={skrStakeBusy || !wallet}
+                  disabled={!canSubmitSkrStake}
                   style={({ pressed }) => [
                     styles.skrActionBtn,
-                    (pressed || skrStakeBusy || !wallet) && styles.skrActionBtnPressed,
+                    (pressed || !canSubmitSkrStake) && styles.skrActionBtnPressed,
                   ]}
                 >
                   <Text style={styles.skrActionBtnText}>{skrStakeBusy ? 'Staking…' : 'Stake SKR'}</Text>
@@ -2505,10 +2548,10 @@ export default function App() {
                     setSkrConfirmAction('unstake');
                     setShowSkrTxConfirm(true);
                   }}
-                  disabled={skrUnstakeBusy || !wallet}
+                  disabled={!canSubmitSkrUnstake}
                   style={({ pressed }) => [
                     styles.skrActionBtn,
-                    (pressed || skrUnstakeBusy || !wallet) && styles.skrActionBtnPressed,
+                    (pressed || !canSubmitSkrUnstake) && styles.skrActionBtnPressed,
                   ]}
                 >
                   <Text style={styles.skrActionBtnText}>{skrUnstakeBusy ? 'Unstaking…' : 'Unstake SKR'}</Text>
@@ -2536,14 +2579,20 @@ export default function App() {
                 <ActionButton
                   label={skrConfirmAction === 'stake' ? 'Confirm Stake' : 'Confirm Unstake'}
                   onPress={async () => {
+                    const action = skrConfirmAction;
                     setShowSkrTxConfirm(false);
-                    if (skrConfirmAction === 'stake') {
+                    if (action === 'stake') {
                       await onStakeSkr();
                     } else {
                       await onUnstakeSkr();
                     }
                   }}
-                  disabled={skrStakeBusy || skrUnstakeBusy}
+                  disabled={
+                    skrStakeBusy ||
+                    skrUnstakeBusy ||
+                    skrSubmitLock ||
+                    (skrConfirmAction === 'stake' ? !canSubmitSkrStake : !canSubmitSkrUnstake)
+                  }
                 />
               </View>
             </View>
@@ -2855,6 +2904,11 @@ const styles = StyleSheet.create({
   skrQuickBtnText: {
     color: '#9AF5F2',
     fontWeight: '700',
+    fontSize: 12,
+  },
+  skrValidationText: {
+    color: '#FF6D7A',
+    fontWeight: '800',
     fontSize: 12,
   },
   skrActionBtn: {
