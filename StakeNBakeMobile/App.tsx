@@ -23,8 +23,6 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { Connection, LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
-  TOKEN_2022_PROGRAM_ID,
-  TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
   createTransferInstruction,
   getAssociatedTokenAddressSync,
@@ -761,74 +759,38 @@ export default function App() {
         return total;
       };
 
-      const readOnce = async (commitment: 'processed' | 'confirmed' | 'finalized') => {
-        const [lamports, tokenProgramAccounts, token2022Accounts, mintScopedAccounts] = await Promise.all([
-          connection.getBalance(owner, commitment).catch(() => null),
-          connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_PROGRAM_ID }, commitment).catch(() => null),
-          connection.getParsedTokenAccountsByOwner(owner, { programId: TOKEN_2022_PROGRAM_ID }, commitment).catch(() => null),
-          connection.getParsedTokenAccountsByOwner(owner, { mint }, commitment).catch(() => null),
-        ]);
-        return { lamports, tokenProgramAccounts, token2022Accounts, mintScopedAccounts };
-      };
+      const lamports =
+        (await connection.getBalance(owner, 'processed').catch(() => null)) ??
+        (await connection.getBalance(owner, 'confirmed').catch(() => null)) ??
+        (await connection.getBalance(owner, 'finalized').catch(() => null));
 
-      let read = await readOnce('processed');
-      if (read.lamports == null) {
-        // Retry at higher commitment before giving up so we don't clobber balances to zero.
-        read = await readOnce('confirmed');
-      }
-      if (read.lamports == null) {
-        read = await readOnce('finalized');
-      }
-
-      if (typeof read.lamports === 'number') {
-        setWalletSolBalance((read.lamports / LAMPORTS_PER_SOL).toFixed(4));
+      if (typeof lamports === 'number') {
+        setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
       }
 
       const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
-      const allRows = [
-        ...(read.tokenProgramAccounts?.value ?? []),
-        ...(read.token2022Accounts?.value ?? []),
-        ...(read.mintScopedAccounts?.value ?? []),
-      ];
-      const seen = new Set<string>();
-      let totalRaw = 0n;
-      let sawSkrAccount = false;
-      for (const row of allRows) {
-        const pubkey = row?.pubkey?.toBase58?.() ?? String(row?.pubkey ?? '');
-        if (!pubkey || seen.has(pubkey)) continue;
-        seen.add(pubkey);
-        const info = (row.account.data as any)?.parsed?.info;
-        if (String(info?.mint ?? '') !== SKR_MINT) continue;
-        sawSkrAccount = true;
+      const canonicalRaw = await (async () => {
         try {
-          totalRaw += BigInt(String(info?.tokenAmount?.amount ?? '0'));
+          const canonicalConn = new Connection(RPC_URLS[cluster], 'confirmed');
+          const canonical = await canonicalConn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+          return sumParsedTokenRows(canonical?.value ?? []);
         } catch {
-          // ignore malformed account rows
+          return 0n;
         }
+      })();
+
+      setWalletSkrBalance(formatRawAmount(canonicalRaw.toString(), decimals, 6));
+      if (canonicalRaw > 0n) {
+        return;
       }
 
-      if (sawSkrAccount) {
-        // Canonical confirmed re-read from cluster primary RPC helps avoid transient partial views.
-        const canonicalRaw = await (async () => {
-          try {
-            const canonicalConn = new Connection(RPC_URLS[cluster], 'confirmed');
-            const canonical = await canonicalConn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
-            return sumParsedTokenRows(canonical?.value ?? []);
-          } catch {
-            return 0n;
-          }
-        })();
-        const stableRaw = canonicalRaw > totalRaw ? canonicalRaw : totalRaw;
-        setWalletSkrBalance(formatRawAmount(stableRaw.toString(), decimals, 6));
-      } else {
-        // Fallback ATA check; if unavailable, keep previous value instead of forcing 0.
-        const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-        const ataBal =
-          (await connection.getTokenAccountBalance(ownerAta, 'processed').catch(() => null)) ??
-          (await connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null));
-        if (ataBal?.value?.uiAmountString != null) {
-          setWalletSkrBalance(ataBal.value.uiAmountString);
-        }
+      // Fallback ATA check only if the canonical mint query returns zero.
+      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+      const ataBal =
+        (await connection.getTokenAccountBalance(ownerAta, 'processed').catch(() => null)) ??
+        (await connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null));
+      if (ataBal?.value?.uiAmountString != null) {
+        setWalletSkrBalance(ataBal.value.uiAmountString);
       }
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
