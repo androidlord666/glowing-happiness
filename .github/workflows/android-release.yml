@@ -29,6 +29,7 @@ jobs:
         with:
           distribution: temurin
           java-version: "21"
+          cache: gradle
 
       - name: Install JS deps
         working-directory: StakeNBakeMobile
@@ -62,7 +63,7 @@ jobs:
           EOF
 
       - name: Build release APK
-        run: ./gradlew clean :app:assembleRelease --no-daemon
+        run: ./gradlew :app:assembleRelease --no-daemon --stacktrace --warning-mode all
 
       - name: Verify JS bundle embedded
         run: |
