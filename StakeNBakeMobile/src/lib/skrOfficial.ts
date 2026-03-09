@@ -8,6 +8,7 @@ const HASH_CREATE_STAKE_TX = 'dc813ba819d17751b8eed9bf1bec60ead4815ba05542ea8735
 const HASH_CREATE_UNSTAKE_TX = '3245bb4ea443c37eadd38a73c78bf55c0bf612f654ee0e7a25a460ab7ff00164';
 const HASH_CREATE_WITHDRAW_TX = 'bd247fc68624cb504883b3e55c2e3e9dfbf344a46d2193f695c042e085c28fa4';
 const HASH_CREATE_CANCEL_UNSTAKE_TX = '7b794004104c25a8e08a7487a95db0c8e2ee484185f01c087c1a8d6abce5b480';
+const HASH_GET_USER_STAKE = '78cdbf4c268706c43b41b4e84323eb790ad6d4c8fc6ef07fa5e8f418774a7e67';
 
 type DecodedServerFnEnvelope = {
   result?: {
@@ -124,6 +125,29 @@ export async function buildOfficialCancelUnstakeTx(params: {
   guardian: string;
 }): Promise<{ transaction: string; fee?: string; cluster?: string }> {
   return ensureTx(await callServerFn(HASH_CREATE_CANCEL_UNSTAKE_TX, params));
+}
+
+export type OfficialUserStakeState = {
+  ok?: boolean;
+  error?: string;
+  cluster?: string;
+  shares?: string;
+  unstakingAmount?: string;
+  unstakeTimestamp?: string;
+  unstakableAmount?: string;
+  stakedAmountForDisplay?: string;
+  withdrawableAmountForDisplay?: string;
+  availableBalance?: string;
+};
+
+export async function fetchOfficialUserStake(params: {
+  walletAddress: string;
+}): Promise<OfficialUserStakeState> {
+  const payload = (await callServerFn(HASH_GET_USER_STAKE, params))?.result;
+  if (!payload || typeof payload !== 'object') {
+    throw new Error('Official SKR API returned invalid user stake payload.');
+  }
+  return payload as OfficialUserStakeState;
 }
 
 export function decodeOfficialUnsignedTx(base64Tx: string): Transaction | VersionedTransaction {

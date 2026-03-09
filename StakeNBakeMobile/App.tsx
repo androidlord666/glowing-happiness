@@ -48,6 +48,7 @@ import {
   buildOfficialUnstakeTx,
   buildOfficialWithdrawTx,
   decodeOfficialUnsignedTx,
+  fetchOfficialUserStake,
 } from './src/lib/skrOfficial';
 import {
   buildConsolidationSessionKey,
@@ -203,6 +204,20 @@ function formatRawAmount(raw: string | number, decimals: number, maxFrac = 6): s
   if (decimals <= 0) return whole.toString();
   const fracStr = frac.toString().padStart(decimals, '0').slice(0, Math.max(0, maxFrac));
   return `${whole.toString()}.${fracStr}`.replace(/\.0+$/, '').replace(/\.$/, '');
+}
+
+function uiAmountToRaw(amountText: string, decimals: number): string {
+  const clean = String(amountText ?? '').trim();
+  if (!clean) return '0';
+  if (!/^[-+]?\d+(\.\d+)?$/.test(clean)) return '0';
+  const neg = clean.startsWith('-');
+  const normalized = clean.replace(/^[-+]/, '');
+  const [wholePart, fracPart = ''] = normalized.split('.');
+  const base = BigInt(10) ** BigInt(Math.max(0, decimals));
+  const whole = BigInt(wholePart || '0') * base;
+  const frac = BigInt((fracPart + '0'.repeat(decimals)).slice(0, decimals) || '0');
+  const out = whole + frac;
+  return neg ? '0' : out.toString();
 }
 
 function chunkArray<T>(items: T[], size: number): T[][] {
@@ -366,6 +381,7 @@ export default function App() {
   const [skrStakeBusy, setSkrStakeBusy] = useState(false);
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
   const [skrWithdrawBusy, setSkrWithdrawBusy] = useState(false);
+  const [skrRefreshBusy, setSkrRefreshBusy] = useState(false);
   const [skrSubmitLock, setSkrSubmitLock] = useState(false);
   const [skrPendingUnstakeRaw, setSkrPendingUnstakeRaw] = useState('0');
   const [skrUnstakeUnlockAtSec, setSkrUnstakeUnlockAtSec] = useState(0);
@@ -794,12 +810,47 @@ export default function App() {
   const refreshStakedSkrBalance = useCallback(async () => {
     if (!wallet) {
       setStakedSkrBalance('—');
+      setSkrPendingUnstakeRaw('0');
+      setSkrUnstakeUnlockAtSec(0);
       return;
     }
-    if (stakedSkrBalance === '—') {
-      setStakedSkrBalance('0');
+    try {
+      const data = await fetchOfficialUserStake({ walletAddress: wallet });
+      if (!data?.ok) {
+        if (stakedSkrBalance === '—') setStakedSkrBalance('0');
+        return;
+      }
+
+      const nextStaked = Number(data.stakedAmountForDisplay ?? '0');
+      setStakedSkrBalance(Number.isFinite(nextStaked) ? nextStaked.toFixed(6) : '0');
+
+      const unstakingRaw = String(data.unstakingAmount ?? '0');
+      const pendingUi = String(data.withdrawableAmountForDisplay ?? '0');
+      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+      const pendingRaw = uiAmountToRaw(pendingUi, decimals);
+      const hasPending = (() => {
+        try {
+          return BigInt(unstakingRaw) > 0n || BigInt(pendingRaw) > 0n;
+        } catch {
+          return false;
+        }
+      })();
+
+      setSkrPendingUnstakeRaw(hasPending ? pendingRaw : '0');
+      const unstakeTs = Number(data.unstakeTimestamp ?? 0);
+      const nowSec = await getChainNowSec().catch(() => Math.floor(Date.now() / 1000));
+      setSkrChainNowSec(nowSec);
+      if (hasPending && unstakeTs > 0) {
+        setSkrUnstakeUnlockAtSec(unstakeTs + SKR_UNSTAKE_COOLDOWN_SECS);
+      } else {
+        setSkrUnstakeUnlockAtSec(0);
+      }
+    } catch {
+      if (stakedSkrBalance === '—') {
+        setStakedSkrBalance('0');
+      }
     }
-  }, [wallet, stakedSkrBalance]);
+  }, [wallet, stakedSkrBalance, skrDecimals, getChainNowSec]);
 
   const onStakeSkr = async () => {
     if (skrStakeBusy || skrSubmitLock) return;
@@ -841,6 +892,7 @@ export default function App() {
       }
       setStatus(`✅ Official SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+      refreshStakedSkrBalance().catch(() => {});
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR stake error', e));
@@ -892,6 +944,7 @@ export default function App() {
       setStatus(
         `⏳ Official unstake requested${sig ? ` (${shortAddr(sig)})` : ''}. Withdraw unlocks in ${formatCountdown(SKR_UNSTAKE_COOLDOWN_SECS)}.`
       );
+      refreshStakedSkrBalance().catch(() => {});
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR unstake error', e));
@@ -935,6 +988,7 @@ export default function App() {
       setSkrPendingUnstakeRaw('0');
       setSkrUnstakeUnlockAtSec(0);
       setStatus(`✅ Official SKR withdrawn (${shortAddr(sig)})`);
+      refreshStakedSkrBalance().catch(() => {});
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR withdraw error', e));
@@ -2532,7 +2586,28 @@ export default function App() {
         {showSkrStaking && (
           <View style={styles.confirmOverlay}>
             <View style={styles.skrStakeCard}>
-              <Text style={styles.skrStakeTitle}>SKR Staking (Official)</Text>
+              <View style={styles.skrTitleRow}>
+                <Text style={styles.skrStakeTitle}>SKR Staking (Official)</Text>
+                <Pressable
+                  onPress={async () => {
+                    if (skrRefreshBusy || !wallet) return;
+                    setSkrRefreshBusy(true);
+                    try {
+                      await refreshWalletBalances(wallet);
+                      await refreshStakedSkrBalance();
+                    } finally {
+                      setSkrRefreshBusy(false);
+                    }
+                  }}
+                  disabled={skrRefreshBusy || !wallet}
+                  style={({ pressed }) => [
+                    styles.skrRefreshBtn,
+                    (pressed || skrRefreshBusy || !wallet) && styles.skrRefreshBtnPressed,
+                  ]}
+                >
+                  <Text style={styles.skrRefreshBtnText}>{skrRefreshBusy ? '...' : 'Refresh'}</Text>
+                </Pressable>
+              </View>
               <Text style={styles.meta}>Source: {skrVaultAddress}</Text>
               <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
               <TextInput
@@ -2563,12 +2638,6 @@ export default function App() {
               </Text>
               {skrStakeAmountTooHigh && (
                 <Text style={styles.skrValidationText}>Amount exceeds Wallet SKR balance.</Text>
-              )}
-              {skrUnstakeAmountTooHigh && (
-                <Text style={styles.skrValidationText}>Amount exceeds requestable staked balance.</Text>
-              )}
-              {pendingUnstakeRawBig > 0n && (
-                <Text style={styles.skrValidationText}>Pending cooldown exists. Withdraw first before new unstake request.</Text>
               )}
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
               <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
@@ -2938,6 +3007,31 @@ const styles = StyleSheet.create({
     color: '#80F3F0',
     fontWeight: '800',
     fontSize: 18,
+  },
+  skrTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  skrRefreshBtn: {
+    minWidth: 36,
+    borderWidth: 1,
+    borderColor: '#2CBFC0',
+    borderRadius: 8,
+    backgroundColor: '#0C3E4A',
+    paddingVertical: 6,
+    paddingHorizontal: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skrRefreshBtnPressed: {
+    opacity: 0.85,
+    transform: [{ scale: 0.98 }],
+  },
+  skrRefreshBtnText: {
+    color: '#9AF5F2',
+    fontWeight: '800',
+    fontSize: 14,
   },
   skrInput: {
     backgroundColor: '#0B2A34',
