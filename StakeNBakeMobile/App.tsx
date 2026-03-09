@@ -2690,9 +2690,6 @@ export default function App() {
                   <Text style={styles.skrQuickBtnText}>Max</Text>
                 </Pressable>
               </View>
-              {skrStakeAmountTooHigh && (
-                <Text style={styles.skrValidationText}>Amount exceeds Wallet SKR balance.</Text>
-              )}
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
               <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
               <Text style={styles.meta}>Unstake cooldown target: 48h (chain-time based).</Text>
