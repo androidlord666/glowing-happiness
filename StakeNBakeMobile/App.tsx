@@ -960,6 +960,12 @@ export default function App() {
         refreshStakedSkrBalance().catch(() => {});
         return;
       }
+      if (classifyError(e) === 'rpc') {
+        suppressNextStatusModalRef.current = true;
+        setSkrErrorDetail('');
+        setStatus('SKR stake request hit RPC rate limits. Retry now.');
+        return;
+      }
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR stake error', e));
     } finally {
@@ -1015,6 +1021,12 @@ export default function App() {
         refreshStakedSkrBalance().catch(() => {});
         return;
       }
+      if (classifyError(e) === 'rpc') {
+        suppressNextStatusModalRef.current = true;
+        setSkrErrorDetail('');
+        setStatus('SKR unstake request hit RPC rate limits. Retry now.');
+        return;
+      }
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR unstake error', e));
     } finally {
@@ -1063,6 +1075,12 @@ export default function App() {
         setStatus('Official SKR withdraw submitted. Wallet returned no signature; refresh in a few seconds.');
         refreshWalletBalances(wallet).catch(() => {});
         refreshStakedSkrBalance().catch(() => {});
+        return;
+      }
+      if (classifyError(e) === 'rpc') {
+        suppressNextStatusModalRef.current = true;
+        setSkrErrorDetail('');
+        setStatus('SKR withdraw request hit RPC rate limits. Retry now.');
         return;
       }
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
