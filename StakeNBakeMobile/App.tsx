@@ -79,7 +79,6 @@ const MAX_SOURCE_ACCOUNTS = 99;
 // Feature flags (fast emergency toggles)
 const FEATURE_FEE_ENABLED = true;
 const FEATURE_WITHDRAW_ENABLED = true;
-const LOW_LATENCY_MODE = true;
 
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
@@ -196,7 +195,7 @@ function chunkArray<T>(items: T[], size: number): T[][] {
   return chunks;
 }
 
-async function withRetries<T>(fn: () => Promise<T>, retries = 2, baseDelayMs = 450): Promise<T> {
+async function withRetries<T>(fn: () => Promise<T>, retries = 0, baseDelayMs = 150): Promise<T> {
   let lastError: any;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -1140,8 +1139,7 @@ export default function App() {
       }
 
       const now = Date.now();
-      if (!walletOverride && now - lastRefreshAtRef.current < 3500) {
-        setStatus('rpc request cooldown 🙏😎');
+      if (!walletOverride && now - lastRefreshAtRef.current < 400) {
         if (lastStakeAccountsRef.current.length) {
           setStakeAccounts(lastStakeAccountsRef.current);
         }
@@ -1156,8 +1154,8 @@ export default function App() {
 
       const items = await withRetries(
         () => fetchStakeAccounts(connection, activeWallet, cluster),
-        2,
-        500
+        0,
+        120
       );
 
       const epochInfo = await connection.getEpochInfo('confirmed').catch(() => null);
@@ -1189,7 +1187,7 @@ export default function App() {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
       if (raw.includes('429') || raw.includes('too many requests')) {
         setRpcHealth('degraded');
-        setStatus('rpc request cooldown 🙏😎');
+        setStatus('RPC busy/rate-limited. Retry now.');
         if (lastStakeAccountsRef.current.length) {
           setStakeAccounts(lastStakeAccountsRef.current);
         }
@@ -1239,9 +1237,6 @@ export default function App() {
       rememberTx(sig);
       trackPendingTx(sig, 'Stake transaction');
       setStatus('🛰️ Stake transaction submitted.');
-      if (!LOW_LATENCY_MODE) {
-        await connection.confirmTransaction(sig, 'confirmed');
-      }
       setDestination(stakeAddress);
       await refreshWalletBalances(wallet);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
@@ -1276,9 +1271,6 @@ export default function App() {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Unstake transaction');
         setStatus(`⏸️ Unstake submitted for ${shortAddr(destination)}.`);
-        if (!LOW_LATENCY_MODE) {
-          await connection.confirmTransaction(sigs[0], 'confirmed');
-        }
         let nextHint = 'Waiting for deactivation/epoch processing before withdraw.';
         try {
           const [activation, epochInfo] = await Promise.all([
@@ -1351,9 +1343,6 @@ export default function App() {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Withdraw transaction');
         setStatus(`💸 Withdraw submitted for ${shortAddr(target)}.`);
-        if (!LOW_LATENCY_MODE) {
-          await connection.confirmTransaction(sigs[0], 'confirmed');
-        }
         // Optimistically remove closed account from list to avoid dust-withdraw confusion.
         setStakeAccounts((prev) => prev.filter((a) => a.pubkey !== target));
         setSelected((prev) => {
@@ -1501,13 +1490,8 @@ export default function App() {
         trackPendingTx(sig, 'Destination delegate transaction');
         anySubmitted = true;
         pushTxEvent({ stage: 'submitted', label: 'Destination delegate transaction', sig, sessionKey });
-        if (!LOW_LATENCY_MODE) {
-          await connection.confirmTransaction(sig, 'confirmed');
-          pushTxEvent({ stage: 'confirmed', label: 'Destination delegate transaction', sig, sessionKey });
-        }
       }
 
-      const submittedMergeSigs: string[] = [];
       let failedMergeCount = 0;
       const cloneTransaction = (tx: Transaction): Transaction =>
         Transaction.from(
@@ -1552,11 +1536,6 @@ export default function App() {
         trackPendingTx(sig, label);
         anySubmitted = true;
         pushTxEvent({ stage: 'submitted', label, sig, sessionKey });
-        if (!LOW_LATENCY_MODE) {
-          await connection.confirmTransaction(sig, 'confirmed');
-          pushTxEvent({ stage: 'confirmed', label, sig, sessionKey });
-        }
-        submittedMergeSigs.push(sig);
       };
       if (consolidationSendMode === 'batch') {
         const batchChunks = chunkArray(mergeTxsToSend, batchTxChunkSize);
@@ -1589,7 +1568,6 @@ export default function App() {
               trackPendingTx(sig, label);
               anySubmitted = true;
               pushTxEvent({ stage: 'submitted', label, sig, sessionKey });
-              submittedMergeSigs.push(sig);
             }
           } catch (e: any) {
             if (classifyError(e) === 'user') throw e;
@@ -1606,18 +1584,6 @@ export default function App() {
             }
           }
           globalIdx += chunkLen;
-        }
-        if (!LOW_LATENCY_MODE) {
-          await Promise.all(
-            submittedMergeSigs.map(async (sig) => {
-              try {
-                await connection.confirmTransaction(sig, 'confirmed');
-                pushTxEvent({ stage: 'confirmed', label: 'Consolidation tx', sig, sessionKey });
-              } catch {
-                // confirmation can lag; submitted signatures still prove signing success
-              }
-            })
-          );
         }
       } else {
         for (let i = 0; i < mergeTxsToSend.length; i++) {
@@ -1778,9 +1744,6 @@ export default function App() {
         }
       }
 
-      const beforeSol = Number(walletSolBalance);
-      const beforeSkr = Number(walletSkrBalance);
-
       const res = await withTimeout(
         fetch('https://lite-api.jup.ag/swap/v1/swap', {
           method: 'POST',
@@ -1824,40 +1787,8 @@ export default function App() {
       if (sigs[0]) {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Swap transaction');
-        setStatus('✅ Swap submitted. Confirming...');
-        await connection.confirmTransaction(sigs[0], 'confirmed');
-
-        const ownerPk = asPublicKey(wallet);
-        const ownerAta = getAssociatedTokenAddressSync(asPublicKey(SKR_MINT), ownerPk);
-        let afterSol = beforeSol;
-        let afterSkr = beforeSkr;
-        const epsilon = 0.000001;
-        // Poll briefly so post-swap balances update quickly even when RPC indexers lag.
-        for (let attempt = 0; attempt < 6; attempt++) {
-          const commitment = attempt < 2 ? 'processed' : 'confirmed';
-          const [solLamports, skrBal] = await Promise.all([
-            connection.getBalance(ownerPk, commitment as any),
-            connection.getTokenAccountBalance(ownerAta, commitment as any).catch(() => null),
-          ]);
-          afterSol = solLamports / LAMPORTS_PER_SOL;
-          afterSkr = Number(skrBal?.value?.uiAmountString ?? '0');
-          setWalletSolBalance(afterSol.toFixed(4));
-          setWalletSkrBalance(Number.isFinite(afterSkr) ? String(afterSkr) : '0');
-
-          if (Math.abs(afterSol - beforeSol) > epsilon || Math.abs(afterSkr - beforeSkr) > epsilon) {
-            break;
-          }
-
-          await new Promise<void>((resolve) => setTimeout(resolve, 450 + attempt * 220));
-        }
-        // Final confirmed sync for consistency.
-        await refreshWalletBalances(wallet);
-
-        setWalletSolBalance(afterSol.toFixed(4));
-        setWalletSkrBalance(Number.isFinite(afterSkr) ? String(afterSkr) : '0');
-        const dSol = Number.isFinite(beforeSol) ? (afterSol - beforeSol).toFixed(4) : 'n/a';
-        const dSkr = Number.isFinite(beforeSkr) ? (afterSkr - beforeSkr).toFixed(4) : 'n/a';
-        setStatus(`✅ Swap confirmed. ΔSOL ${dSol} / ΔSKR ${dSkr}`);
+        setStatus('✅ Swap submitted. Confirmation and balance sync running in background.');
+        refreshWalletBalances(wallet).catch(() => {});
       }
     } catch (e: any) {
       setStatus(actionError('Swap error', e));
@@ -1903,9 +1834,6 @@ export default function App() {
         rememberTx(sigs[0]);
         trackPendingTx(sigs[0], 'Transfer transaction');
         setStatus('🛰️ Transfer submitted.');
-        if (!LOW_LATENCY_MODE) {
-          await connection.confirmTransaction(sigs[0], 'confirmed');
-        }
         setStatus(`✅ Transfer submitted to ${shortAddr(recipient)}.`);
       }
     } catch (e: any) {
