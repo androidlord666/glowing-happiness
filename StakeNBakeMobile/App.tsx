@@ -471,8 +471,6 @@ export default function App() {
     [parsedSkrBalance, parsedSkrAmount]
   );
   const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrStakeAmountTooHigh;
-  const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && pendingUnstakeRawBig === 0n && skrAmountIsValid;
-  const canSubmitSkrWithdraw = !!wallet && !skrSubmitLock && pendingUnstakeRawBig > 0n && unstakeCooldownReady;
   const stakedSkrDisplay = useMemo(
     () => (stakedSkrBalance === '—' ? (skrRefreshBusy ? 'Refreshing...' : 'Loading...') : `${stakedSkrBalance} SKR`),
     [stakedSkrBalance, skrRefreshBusy]
@@ -2699,10 +2697,10 @@ export default function App() {
                     setSkrConfirmAction('unstake');
                     setShowSkrTxConfirm(true);
                   }}
-                  disabled={!canSubmitSkrUnstake}
+                  disabled={skrSubmitLock || skrUnstakeBusy}
                   style={({ pressed }) => [
                     styles.skrActionBtn,
-                    (pressed || !canSubmitSkrUnstake) && styles.skrActionBtnPressed,
+                    (pressed || skrSubmitLock || skrUnstakeBusy) && styles.skrActionBtnPressed,
                   ]}
                 >
                   <Text style={styles.skrActionBtnText}>{skrUnstakeBusy ? 'Requesting…' : 'Request Unstake'}</Text>
@@ -2714,10 +2712,10 @@ export default function App() {
                     setSkrConfirmAction('withdraw');
                     setShowSkrTxConfirm(true);
                   }}
-                  disabled={!canSubmitSkrWithdraw}
+                  disabled={skrSubmitLock || skrWithdrawBusy}
                   style={({ pressed }) => [
                     styles.skrActionBtn,
-                    (pressed || !canSubmitSkrWithdraw) && styles.skrActionBtnPressed,
+                    (pressed || skrSubmitLock || skrWithdrawBusy) && styles.skrActionBtnPressed,
                   ]}
                 >
                   <Text style={styles.skrActionBtnText}>{skrWithdrawBusy ? 'Withdrawing…' : 'Withdraw SKR'}</Text>
@@ -2765,7 +2763,7 @@ export default function App() {
                     skrUnstakeBusy ||
                     skrWithdrawBusy ||
                     skrSubmitLock ||
-                    (skrConfirmAction === 'stake' ? !canSubmitSkrStake : skrConfirmAction === 'unstake' ? !canSubmitSkrUnstake : !canSubmitSkrWithdraw)
+                    (skrConfirmAction === 'stake' ? !canSubmitSkrStake : false)
                   }
                 />
               </View>
