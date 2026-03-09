@@ -745,6 +745,14 @@ export default function App() {
     try {
       const owner = asPublicKey(active);
       const mint = asPublicKey(SKR_MINT);
+      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+      const previousRaw = (() => {
+        try {
+          return BigInt(uiAmountToRaw(walletSkrBalance, decimals));
+        } catch {
+          return 0n;
+        }
+      })();
       const sumParsedTokenRows = (rows: any[]): bigint => {
         let total = 0n;
         for (const row of rows) {
@@ -768,8 +776,15 @@ export default function App() {
         setWalletSolBalance((lamports / LAMPORTS_PER_SOL).toFixed(4));
       }
 
-      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
-      const canonicalRaw = await (async () => {
+      const confirmedRaw = await (async () => {
+        try {
+          const rows = await connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+          return sumParsedTokenRows(rows?.value ?? []);
+        } catch {
+          return 0n;
+        }
+      })();
+      const primaryRaw = await (async () => {
         try {
           const canonicalConn = new Connection(RPC_URLS[cluster], 'confirmed');
           const canonical = await canonicalConn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
@@ -778,24 +793,12 @@ export default function App() {
           return 0n;
         }
       })();
-
-      setWalletSkrBalance(formatRawAmount(canonicalRaw.toString(), decimals, 6));
-      if (canonicalRaw > 0n) {
-        return;
-      }
-
-      // Fallback ATA check only if the canonical mint query returns zero.
-      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-      const ataBal =
-        (await connection.getTokenAccountBalance(ownerAta, 'processed').catch(() => null)) ??
-        (await connection.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null));
-      if (ataBal?.value?.uiAmountString != null) {
-        setWalletSkrBalance(ataBal.value.uiAmountString);
-      }
+      const stableRaw = [confirmedRaw, primaryRaw, previousRaw].reduce((max, value) => (value > max ? value : max), 0n);
+      setWalletSkrBalance(formatRawAmount(stableRaw.toString(), decimals, 6));
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
     }
-  }, [connection, wallet, skrDecimals, cluster]);
+  }, [connection, wallet, skrDecimals, cluster, walletSkrBalance]);
 
   const getChainNowSec = useCallback(async () => {
     const slot =
