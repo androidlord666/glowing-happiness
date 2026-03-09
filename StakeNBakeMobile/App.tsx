@@ -21,7 +21,7 @@ import Clipboard from '@react-native-clipboard/clipboard';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
-import { LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
+import { Connection, LAMPORTS_PER_SOL, StakeProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
@@ -39,7 +39,7 @@ import {
 } from './src/lib/stake';
 import { asPublicKey, createWalletAdapter } from './src/lib/mwa';
 import { colors } from './src/theme/colors';
-import { APP_NAME, ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
+import { APP_NAME, ClusterName, DEFAULT_CLUSTER, DEFAULT_EXPLORER, ExplorerName, RPC_URLS, VALIDATOR_VOTE_BY_CLUSTER } from './src/config';
 import { addressUrl, txUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
@@ -747,6 +747,19 @@ export default function App() {
     try {
       const owner = asPublicKey(active);
       const mint = asPublicKey(SKR_MINT);
+      const sumParsedTokenRows = (rows: any[]): bigint => {
+        let total = 0n;
+        for (const row of rows) {
+          const info = (row?.account?.data as any)?.parsed?.info;
+          if (String(info?.mint ?? '') !== SKR_MINT) continue;
+          try {
+            total += BigInt(String(info?.tokenAmount?.amount ?? '0'));
+          } catch {
+            // ignore malformed token rows
+          }
+        }
+        return total;
+      };
 
       const readOnce = async (commitment: 'processed' | 'confirmed' | 'finalized') => {
         const [lamports, tokenProgramAccounts, token2022Accounts, mintScopedAccounts] = await Promise.all([
@@ -795,7 +808,18 @@ export default function App() {
       }
 
       if (sawSkrAccount) {
-        setWalletSkrBalance(formatRawAmount(totalRaw.toString(), decimals, 6));
+        // Canonical confirmed re-read from cluster primary RPC helps avoid transient partial views.
+        const canonicalRaw = await (async () => {
+          try {
+            const canonicalConn = new Connection(RPC_URLS[cluster], 'confirmed');
+            const canonical = await canonicalConn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+            return sumParsedTokenRows(canonical?.value ?? []);
+          } catch {
+            return 0n;
+          }
+        })();
+        const stableRaw = canonicalRaw > totalRaw ? canonicalRaw : totalRaw;
+        setWalletSkrBalance(formatRawAmount(stableRaw.toString(), decimals, 6));
       } else {
         // Fallback ATA check; if unavailable, keep previous value instead of forcing 0.
         const ownerAta = getAssociatedTokenAddressSync(mint, owner);
@@ -809,7 +833,7 @@ export default function App() {
     } catch {
       // keep last-known balances to avoid flicker/disappearing values
     }
-  }, [connection, wallet, skrDecimals]);
+  }, [connection, wallet, skrDecimals, cluster]);
 
   const getChainNowSec = useCallback(async () => {
     const slot =
