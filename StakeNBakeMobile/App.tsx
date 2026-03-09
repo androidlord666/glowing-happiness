@@ -990,12 +990,15 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
       if (!sig) {
+        suppressNextStatusModalRef.current = true;
         setStatus('Official SKR withdraw submitted in wallet. Signature unavailable; refresh shortly.');
         await refreshWalletBalances(wallet);
+        await refreshStakedSkrBalance();
         return;
       }
       rememberTx(sig);
       trackPendingTx(sig, 'Official SKR withdraw');
+      setStatus(`Official SKR withdraw submitted (${shortAddr(sig)}). Waiting confirmation...`);
       await refreshWalletBalances(wallet);
       setSkrPendingUnstakeRaw('0');
       setSkrUnstakeUnlockAtSec(0);
@@ -1210,6 +1213,14 @@ export default function App() {
       clearInterval(t);
     };
   }, [wallet, isAppActive, getChainNowSec]);
+
+  useEffect(() => {
+    if (!wallet || !isAppActive || !showSkrStaking || !skrUnstakeUnlockAtSec) return;
+    const t = setInterval(() => {
+      setSkrChainNowSec((prev) => prev + 1);
+    }, 1000);
+    return () => clearInterval(t);
+  }, [wallet, isAppActive, showSkrStaking, skrUnstakeUnlockAtSec]);
 
   useEffect(() => {
     if (!isAppActive) return;
