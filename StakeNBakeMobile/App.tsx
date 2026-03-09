@@ -725,8 +725,8 @@ export default function App() {
     const tokenProgramId = await resolveSkrTokenProgramId();
     const info = await connection.getParsedAccountInfo(stakingPk, 'confirmed').catch(() => null);
     const parsedInfo = (info?.value as any)?.data?.parsed?.info;
-    const parsedMint = String(parsedInfo?.mint ?? '');
-    const parsedOwner = String(parsedInfo?.owner ?? '');
+    const parsedMint = String(parsedInfo?.mint ?? '').trim();
+    const parsedOwner = String(parsedInfo?.owner ?? parsedInfo?.authority ?? '').trim();
     if (parsedMint === SKR_MINT && parsedOwner) {
       return {
         tokenAccount: stakingPk,
@@ -828,8 +828,11 @@ export default function App() {
       const stakingSource = await resolveSkrStakingTokenAccount();
       const tokenProgramId = stakingSource.tokenProgramId;
       const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk, true, tokenProgramId);
-      if (stakingSource.authority !== wallet) {
-        throw new Error(`Unstake requires staking authority wallet ${shortAddr(stakingSource.authority)} to be connected.`);
+      const sourceAuthority = asPublicKey(stakingSource.authority);
+      if (!sourceAuthority.equals(ownerPk)) {
+        throw new Error(
+          `Unstake requires staking authority wallet ${shortAddr(sourceAuthority.toBase58())}. Connected: ${shortAddr(ownerPk.toBase58())}.`
+        );
       }
 
       const tx = new Transaction();
@@ -2789,7 +2792,7 @@ const styles = StyleSheet.create({
   topRightButtons: {
     position: 'absolute',
     right: 14,
-    top: 14,
+    top: 56,
     gap: 8,
     alignItems: 'flex-end',
     zIndex: 80,
