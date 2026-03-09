@@ -838,10 +838,6 @@ export default function App() {
 
       const nextStaked = Number(data.stakedAmountForDisplay ?? '0');
       setStakedSkrBalance(Number.isFinite(nextStaked) ? nextStaked.toFixed(6) : '0');
-      const nextAvailable = Number(data.availableBalance ?? Number.NaN);
-      if (Number.isFinite(nextAvailable)) {
-        setWalletSkrBalance(nextAvailable.toFixed(6));
-      }
 
       const unstakingRaw = String(data.unstakingAmount ?? '0');
       const pendingUi = String(data.withdrawableAmountForDisplay ?? '0');
