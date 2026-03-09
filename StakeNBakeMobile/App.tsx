@@ -48,6 +48,7 @@ import {
   buildOfficialUnstakeTx,
   buildOfficialWithdrawTx,
   decodeOfficialUnsignedTx,
+  fetchOfficialCurrentApy,
   fetchOfficialUserStake,
 } from './src/lib/skrOfficial';
 import {
@@ -390,6 +391,7 @@ export default function App() {
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
   const [skrWithdrawBusy, setSkrWithdrawBusy] = useState(false);
   const [skrRefreshBusy, setSkrRefreshBusy] = useState(false);
+  const [skrApyPct, setSkrApyPct] = useState<string>('—');
   const [skrSubmitLock, setSkrSubmitLock] = useState(false);
   const [skrPendingUnstakeRaw, setSkrPendingUnstakeRaw] = useState('0');
   const [skrUnstakeUnlockAtSec, setSkrUnstakeUnlockAtSec] = useState(0);
@@ -475,10 +477,12 @@ export default function App() {
     () => (stakedSkrBalance === '—' ? (skrRefreshBusy ? 'Refreshing...' : 'Loading...') : `${stakedSkrBalance} SKR`),
     [stakedSkrBalance, skrRefreshBusy]
   );
-  const pendingSkrDisplay = useMemo(
-    () => `${pendingUnstakeUi} SKR`,
-    [pendingUnstakeUi]
-  );
+  const pendingWithCooldownDisplay = useMemo(() => {
+    const cooldownText = skrUnstakeUnlockAtSec
+      ? (unstakeCooldownReady ? 'Ready to withdraw' : formatCountdown(unstakeCooldownRemainingSec))
+      : 'No active cooldown';
+    return `${pendingUnstakeUi} SKR  |  ${cooldownText}`;
+  }, [pendingUnstakeUi, skrUnstakeUnlockAtSec, unstakeCooldownRemainingSec, unstakeCooldownReady]);
   const skrBalanceAfterStake = useMemo(() => {
     if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
     return Math.max(0, parsedSkrBalance - Math.max(0, parsedSkrAmount)).toFixed(4);
@@ -916,7 +920,6 @@ export default function App() {
     setSkrSubmitLock(true);
     try {
       if (!wallet) throw new Error('Wallet not connected');
-      if (pendingUnstakeRawBig > 0n) throw new Error('Pending cooldown exists. Withdraw before requesting another unstake.');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
 
@@ -972,15 +975,11 @@ export default function App() {
     setSkrSubmitLock(true);
     try {
       if (!wallet) throw new Error('Wallet not connected');
-      if (pendingUnstakeRawBig <= 0n) throw new Error('No pending unstake amount.');
       setSkrWithdrawBusy(true);
       setSkrErrorDetail('');
 
       const chainNowSec = await getChainNowSec();
       setSkrChainNowSec(chainNowSec);
-      if (chainNowSec < skrUnstakeUnlockAtSec) {
-        throw new Error(`Cooldown active. Time left: ${formatCountdown(skrUnstakeUnlockAtSec - chainNowSec)}.`);
-      }
 
       setStatus('Building official SKR withdraw transaction...');
       const built = await buildOfficialWithdrawTx({
@@ -1157,10 +1156,17 @@ export default function App() {
       setSkrVaultAddress('—');
       setSkrPendingUnstakeRaw('0');
       setSkrUnstakeUnlockAtSec(0);
+      setSkrApyPct('—');
       return;
     }
     setSkrVaultAddress('stake.solanamobile.com');
     refreshStakedSkrBalance().catch(() => {});
+    fetchOfficialCurrentApy()
+      .then((apy) => {
+        if (apy == null || !Number.isFinite(apy)) return;
+        setSkrApyPct((apy * 100).toFixed(2));
+      })
+      .catch(() => {});
   }, [wallet, showSkrStaking, refreshStakedSkrBalance]);
 
   useEffect(() => {
@@ -2620,6 +2626,10 @@ export default function App() {
                     try {
                       await refreshWalletBalances(wallet);
                       await refreshStakedSkrBalance();
+                      const apy = await fetchOfficialCurrentApy().catch(() => null);
+                      if (apy != null && Number.isFinite(apy)) {
+                        setSkrApyPct((apy * 100).toFixed(2));
+                      }
                     } finally {
                       setSkrRefreshBusy(false);
                     }
@@ -2641,12 +2651,12 @@ export default function App() {
                   <Text style={styles.skrBalanceValue}>{walletSkrBalance} SKR</Text>
                 </View>
                 <View style={styles.skrBalanceCell}>
-                  <Text style={styles.skrBalanceLabel}>Staked SKR</Text>
+                  <Text style={styles.skrBalanceLabel}>Staked SKR (APY {skrApyPct === '—' ? '—' : `${skrApyPct}%`})</Text>
                   <Text style={styles.skrBalanceValue}>{stakedSkrDisplay}</Text>
                 </View>
                 <View style={styles.skrBalanceCell}>
                   <Text style={styles.skrBalanceLabel}>Pending Unstake</Text>
-                  <Text style={styles.skrBalanceValue}>{pendingSkrDisplay}</Text>
+                  <Text style={styles.skrBalanceValue}>{pendingWithCooldownDisplay}</Text>
                 </View>
               </View>
               <TextInput
@@ -2669,9 +2679,6 @@ export default function App() {
                   <Text style={styles.skrQuickBtnText}>Max</Text>
                 </Pressable>
               </View>
-              <Text style={styles.meta}>
-                Cooldown: {skrUnstakeUnlockAtSec ? (unstakeCooldownReady ? 'Ready to withdraw' : formatCountdown(unstakeCooldownRemainingSec)) : 'No active cooldown'}
-              </Text>
               {skrStakeAmountTooHigh && (
                 <Text style={styles.skrValidationText}>Amount exceeds Wallet SKR balance.</Text>
               )}

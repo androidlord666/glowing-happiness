@@ -9,6 +9,7 @@ const HASH_CREATE_UNSTAKE_TX = '3245bb4ea443c37eadd38a73c78bf55c0bf612f654ee0e7a
 const HASH_CREATE_WITHDRAW_TX = 'bd247fc68624cb504883b3e55c2e3e9dfbf344a46d2193f695c042e085c28fa4';
 const HASH_CREATE_CANCEL_UNSTAKE_TX = '7b794004104c25a8e08a7487a95db0c8e2ee484185f01c087c1a8d6abce5b480';
 const HASH_GET_USER_STAKE = '78cdbf4c268706c43b41b4e84323eb790ad6d4c8fc6ef07fa5e8f418774a7e67';
+const HASH_GET_CURRENT_APY = '48292189fcfbf90252fc613ffef21b1fde10b2b042b6d374f2f036a1044769af';
 
 type DecodedServerFnEnvelope = {
   result?: {
@@ -148,6 +149,15 @@ export async function fetchOfficialUserStake(params: {
     throw new Error('Official SKR API returned invalid user stake payload.');
   }
   return payload as OfficialUserStakeState;
+}
+
+export async function fetchOfficialCurrentApy(): Promise<number | null> {
+  const payload = (await callServerFn(HASH_GET_CURRENT_APY, {}))?.result as any;
+  if (!payload?.ok) return null;
+  const apy = payload?.apy;
+  if (typeof apy === 'number' && Number.isFinite(apy)) return apy;
+  if (apy && typeof apy === 'object' && Number.isFinite(Number(apy.s))) return Number(apy.s);
+  return null;
 }
 
 export function decodeOfficialUnsignedTx(base64Tx: string): Transaction | VersionedTransaction {
