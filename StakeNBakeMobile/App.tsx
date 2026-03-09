@@ -338,6 +338,7 @@ export default function App() {
   const [txLifecycleEvents, setTxLifecycleEvents] = useState<TxLifecycleEvent[]>([]);
   const [walletSolBalance, setWalletSolBalance] = useState<string>('—');
   const [walletSkrBalance, setWalletSkrBalance] = useState<string>('—');
+  const [stakedSkrBalance, setStakedSkrBalance] = useState<string>('—');
   const [_refreshBusy, setRefreshBusy] = useState(false);
   const [connectBusy, setConnectBusy] = useState(false);
   const [stakeBusy, setStakeBusy] = useState(false);
@@ -743,6 +744,20 @@ export default function App() {
     };
   }, [connection, resolveSkrTokenProgramId]);
 
+  const refreshStakedSkrBalance = useCallback(async () => {
+    try {
+      const stakingSource = await resolveSkrStakingTokenAccount();
+      const balance =
+        (await connection.getTokenAccountBalance(stakingSource.tokenAccount, 'processed').catch(() => null)) ??
+        (await connection.getTokenAccountBalance(stakingSource.tokenAccount, 'confirmed').catch(() => null));
+      if (balance?.value?.uiAmountString != null) {
+        setStakedSkrBalance(balance.value.uiAmountString);
+      }
+    } catch {
+      // keep last-known staked balance to avoid flicker/disappearing values
+    }
+  }, [connection, resolveSkrStakingTokenAccount]);
+
   const onStakeSkr = async () => {
     if (skrStakeBusy) return;
     try {
@@ -798,6 +813,7 @@ export default function App() {
       rememberTx(sig);
       trackPendingTx(sig, 'SKR stake transfer');
       await refreshWalletBalances(wallet);
+      await refreshStakedSkrBalance();
       setStatus(`✅ SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
     } catch (e: any) {
@@ -858,6 +874,7 @@ export default function App() {
       rememberTx(sig);
       trackPendingTx(sig, 'SKR unstake transfer');
       await refreshWalletBalances(wallet);
+      await refreshStakedSkrBalance();
       setStatus(`✅ SKR unstaked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
     } catch (e: any) {
@@ -996,9 +1013,18 @@ export default function App() {
     if (!wallet || !isAppActive) return;
     const t = setInterval(() => {
       refreshWalletBalances(wallet).catch(() => {});
+      refreshStakedSkrBalance().catch(() => {});
     }, 7000);
     return () => clearInterval(t);
-  }, [wallet, isAppActive, refreshWalletBalances]);
+  }, [wallet, isAppActive, refreshWalletBalances, refreshStakedSkrBalance]);
+
+  useEffect(() => {
+    if (!wallet) {
+      setStakedSkrBalance('—');
+      return;
+    }
+    refreshStakedSkrBalance().catch(() => {});
+  }, [wallet, showSkrStaking, refreshStakedSkrBalance]);
 
   useEffect(() => {
     if (!isAppActive) return;
@@ -1023,6 +1049,7 @@ export default function App() {
         if (done.size) {
           setPendingTxs((prev) => prev.filter((p) => !done.has(p.sig)));
           await refreshWalletBalances();
+          await refreshStakedSkrBalance();
           setStatus('Transaction confirmed. Swipe down from top to sync stake-account state.');
         }
       } catch {
@@ -1031,7 +1058,7 @@ export default function App() {
     }, 3500);
 
     return () => clearInterval(t);
-  }, [pendingTxs, connection, isAppActive, pushTxEvent, refreshWalletBalances, rememberTx]);
+  }, [pendingTxs, connection, isAppActive, pushTxEvent, refreshWalletBalances, refreshStakedSkrBalance, rememberTx]);
 
   const connectWallet = async () => {
     if (connectBusy) return;
@@ -2495,6 +2522,7 @@ export default function App() {
                 </Pressable>
                 <Text style={styles.meta}>Wallet SKR: {walletSkrBalance}</Text>
               </View>
+              <Text style={styles.meta}>Staked SKR: {stakedSkrBalance}</Text>
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
               <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
               <View style={styles.skrActionRow}>
