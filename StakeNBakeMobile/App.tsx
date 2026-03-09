@@ -83,6 +83,7 @@ const LOW_LATENCY_MODE = true;
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
 const SKR_STAKING_ACCOUNT = '4HQy82s9CHTv1GsYKnANHMiHfhcqesYkK6sB3RDSYyqw';
+const SEEKER_BUTTON_IMAGE = 'https://drive.google.com/uc?export=view&id=1I9D2lvxwN7KKUHcSLGJUiOwh__x6rFcm';
 const SKR_FALLBACK_DECIMALS = 6;
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
@@ -2368,21 +2369,21 @@ export default function App() {
         <View style={styles.topRightButtons}>
           <Pressable
             onPress={() => {
-              setShowSettings(false);
-              setShowSkrStaking(true);
-            }}
-            style={styles.skrBtnTopRight}
-          >
-            <Text style={styles.skrBtnTopRightText}>SKR</Text>
-          </Pressable>
-          <Pressable
-            onPress={() => {
               setShowSkrStaking(false);
               setShowSettings((v) => !v);
             }}
             style={styles.gearBtnTopRight}
           >
             <Text style={styles.gearIcon}>⚙️</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setShowSettings(false);
+              setShowSkrStaking(true);
+            }}
+            style={styles.seekerBtnTopRight}
+          >
+            <Image source={{ uri: SEEKER_BUTTON_IMAGE }} style={styles.seekerBtnImage} resizeMode="contain" />
           </Pressable>
         </View>
 
@@ -2749,19 +2750,21 @@ const styles = StyleSheet.create({
     alignItems: 'flex-end',
     zIndex: 80,
   },
-  skrBtnTopRight: {
+  seekerBtnTopRight: {
     paddingVertical: 8,
-    paddingHorizontal: 12,
+    paddingHorizontal: 8,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: '#3AD4CF',
     backgroundColor: '#08343D',
+    width: 44,
+    height: 44,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
-  skrBtnTopRightText: {
-    fontSize: 13,
-    fontWeight: '800',
-    color: '#7AE8E5',
-    letterSpacing: 0.3,
+  seekerBtnImage: {
+    width: 28,
+    height: 28,
   },
   gearBtnTopRight: {
     padding: 8,
