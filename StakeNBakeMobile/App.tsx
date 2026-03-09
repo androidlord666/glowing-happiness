@@ -23,11 +23,9 @@ import { SafeAreaProvider, SafeAreaView } from 'react-native-safe-area-context';
 import QRCode from 'react-native-qrcode-svg';
 import { LAMPORTS_PER_SOL, PublicKey, StakeProgram, SystemProgram, Transaction, VersionedTransaction } from '@solana/web3.js';
 import {
-  ACCOUNT_SIZE,
   TOKEN_2022_PROGRAM_ID,
   TOKEN_PROGRAM_ID,
   createAssociatedTokenAccountIdempotentInstruction,
-  createInitializeAccountInstruction,
   createTransferInstruction,
   getAssociatedTokenAddressSync,
 } from '@solana/spl-token';
@@ -46,6 +44,12 @@ import { addressUrl, txUrl } from './src/lib/explorer';
 import { buildTransferTx } from './src/lib/walletActions';
 import { resolveRecipientAddress } from './src/lib/sns';
 import {
+  buildOfficialStakeTx,
+  buildOfficialUnstakeTx,
+  buildOfficialWithdrawTx,
+  decodeOfficialUnsignedTx,
+} from './src/lib/skrOfficial';
+import {
   buildConsolidationSessionKey,
   ConsolidationSendMode,
   describeMergeCompatibility,
@@ -55,6 +59,7 @@ import {
 const walletAdapter = createWalletAdapter();
 const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
 const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
+const seekerButtonImage = require('./src/assets/seeker-button.png');
 
 type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
@@ -94,7 +99,6 @@ const DEFAULT_BATCH_TX_PER_REQUEST: ConsolidationBatchChunkSize = 3;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
 const TX_LIFECYCLE_STORAGE_KEY = '@staking_with_solana_mobile:txLifecycleEvents:v1';
 const STAKE_SNAPSHOT_CACHE_PREFIX = '@staking_with_solana_mobile:stakeSnapshot:v1';
-const SKR_USER_VAULT_SEED = 'skr-vault-v1';
 const SKR_UNSTAKE_COOLDOWN_SECS = 48 * 60 * 60;
 const SKR_COOLDOWN_CACHE_PREFIX = '@staking_with_solana_mobile:skrCooldown:v1';
 
@@ -396,8 +400,6 @@ export default function App() {
   const refreshMetricsRef = useRef({ count: 0, totalMs: 0 });
   const consolidationInFlightRef = useRef(false);
   const consolidationIdempotencyRef = useRef<Record<string, number>>({});
-  const skrTokenProgramIdRef = useRef<PublicKey | null>(null);
-  const skrTokenProgramResolvedAtRef = useRef(0);
 
   const palette = theme === 'dark'
     ? colors
@@ -437,7 +439,10 @@ export default function App() {
     [skrUnstakeUnlockAtSec, unstakeCooldownRemainingSec]
   );
   const parsedRequestableStaked = useMemo(
-    () => Math.max(0, (Number.isFinite(parsedStakedSkrBalance) ? parsedStakedSkrBalance : 0) - (Number.isFinite(parsedPendingUnstakeUi) ? parsedPendingUnstakeUi : 0)),
+    () => {
+      if (!Number.isFinite(parsedStakedSkrBalance)) return Number.NaN;
+      return Math.max(0, parsedStakedSkrBalance - (Number.isFinite(parsedPendingUnstakeUi) ? parsedPendingUnstakeUi : 0));
+    },
     [parsedStakedSkrBalance, parsedPendingUnstakeUi]
   );
   const parsedSkrAmount = useMemo(() => Number(skrStakeAmount), [skrStakeAmount]);
@@ -775,44 +780,6 @@ export default function App() {
     }
   }, [connection, wallet, skrDecimals]);
 
-  const resolveSkrTokenProgramId = useCallback(async () => {
-    const cached = skrTokenProgramIdRef.current;
-    const now = Date.now();
-    if (cached && now - skrTokenProgramResolvedAtRef.current < 10 * 60 * 1000) {
-      return cached;
-    }
-    const mintPk = asPublicKey(SKR_MINT);
-    let mintInfo = await connection.getAccountInfo(mintPk, 'processed').catch(() => null);
-    if (!mintInfo) {
-      mintInfo = await connection.getAccountInfo(mintPk, 'confirmed').catch(() => null);
-    }
-    if (!mintInfo) {
-      if (cached) return cached;
-      return TOKEN_PROGRAM_ID;
-    }
-    const resolved = mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
-    skrTokenProgramIdRef.current = resolved;
-    skrTokenProgramResolvedAtRef.current = now;
-    return resolved;
-  }, [connection]);
-
-  const resolveUserSkrVaultAccount = useCallback(async (ownerAddress?: string) => {
-    const active = ownerAddress ?? wallet;
-    if (!active) throw new Error('Wallet not connected');
-    const ownerPk = asPublicKey(active);
-    const tokenProgramId = await resolveSkrTokenProgramId();
-    const vaultPk = await PublicKey.createWithSeed(ownerPk, SKR_USER_VAULT_SEED, tokenProgramId);
-    const info =
-      (await connection.getAccountInfo(vaultPk, 'processed').catch(() => null)) ??
-      (await connection.getAccountInfo(vaultPk, 'confirmed').catch(() => null));
-    return {
-      tokenAccount: vaultPk,
-      tokenProgramId,
-      exists: !!info,
-      owner: ownerPk,
-    };
-  }, [connection, resolveSkrTokenProgramId, wallet]);
-
   const getChainNowSec = useCallback(async () => {
     const slot =
       (await connection.getSlot('processed').catch(() => null)) ??
@@ -825,26 +792,14 @@ export default function App() {
   }, [connection]);
 
   const refreshStakedSkrBalance = useCallback(async () => {
-    try {
-      if (!wallet) {
-        setStakedSkrBalance('—');
-        return;
-      }
-      const stakingSource = await resolveUserSkrVaultAccount(wallet);
-      if (!stakingSource.exists) {
-        setStakedSkrBalance('0');
-        return;
-      }
-      const balance =
-        (await connection.getTokenAccountBalance(stakingSource.tokenAccount, 'processed').catch(() => null)) ??
-        (await connection.getTokenAccountBalance(stakingSource.tokenAccount, 'confirmed').catch(() => null));
-      if (balance?.value?.uiAmountString != null) {
-        setStakedSkrBalance(balance.value.uiAmountString);
-      }
-    } catch {
-      // keep last-known staked balance to avoid flicker/disappearing values
+    if (!wallet) {
+      setStakedSkrBalance('—');
+      return;
     }
-  }, [connection, resolveUserSkrVaultAccount, wallet]);
+    if (stakedSkrBalance === '—') {
+      setStakedSkrBalance('0');
+    }
+  }, [wallet, stakedSkrBalance]);
 
   const onStakeSkr = async () => {
     if (skrStakeBusy || skrSubmitLock) return;
@@ -857,75 +812,34 @@ export default function App() {
         throw new Error(`Stake amount exceeds wallet balance (${walletSkrBalance} SKR).`);
       }
 
-      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
-      const raw = BigInt(Math.round(amount * Math.pow(10, decimals)));
-      if (raw <= 0n) throw new Error('Amount too small');
-
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
-      setStatus('Submitting SKR stake transfer...');
+      setStatus('Building official SKR stake transaction...');
 
-      const ownerPk = asPublicKey(wallet);
-      const mintPk = asPublicKey(SKR_MINT);
-      const stakingTarget = await resolveUserSkrVaultAccount(wallet);
-      const tokenProgramId = stakingTarget.tokenProgramId;
-      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk, true, tokenProgramId);
-
-      const tx = new Transaction();
-      tx.add(
-        createAssociatedTokenAccountIdempotentInstruction(
-          ownerPk,
-          ownerAta,
-          ownerPk,
-          mintPk,
-          tokenProgramId
-        )
-      );
-      if (!stakingTarget.exists) {
-        const rentLamports =
-          (await connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE, 'processed').catch(() => null)) ??
-          (await connection.getMinimumBalanceForRentExemption(ACCOUNT_SIZE, 'confirmed').catch(() => null)) ??
-          0;
-        tx.add(
-          SystemProgram.createAccountWithSeed({
-            fromPubkey: ownerPk,
-            basePubkey: ownerPk,
-            seed: SKR_USER_VAULT_SEED,
-            newAccountPubkey: stakingTarget.tokenAccount,
-            lamports: rentLamports,
-            space: ACCOUNT_SIZE,
-            programId: tokenProgramId,
-          })
-        );
-        tx.add(
-          createInitializeAccountInstruction(
-            stakingTarget.tokenAccount,
-            mintPk,
-            ownerPk,
-            tokenProgramId
-          )
-        );
-      }
-      tx.add(createTransferInstruction(ownerAta, stakingTarget.tokenAccount, ownerPk, raw, [], tokenProgramId));
-
-      const latest = await connection.getLatestBlockhash('confirmed');
-      tx.recentBlockhash = latest.blockhash;
-      tx.lastValidBlockHeight = latest.lastValidBlockHeight;
-      tx.feePayer = ownerPk;
-
+      const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
+      const built = await buildOfficialStakeTx({
+        naturalTokenAmount: amountText,
+        payer: wallet,
+        user: wallet,
+      });
+      const tx = decodeOfficialUnsignedTx(built.transaction);
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
       if (!sig) {
-        setStatus('SKR stake submitted in wallet. Signature unavailable; refresh shortly.');
+        setStatus('Official SKR stake submitted in wallet. Signature unavailable; refresh shortly.');
         await refreshWalletBalances(wallet);
         await refreshStakedSkrBalance();
         return;
       }
       rememberTx(sig);
-      trackPendingTx(sig, 'SKR stake transfer');
+      trackPendingTx(sig, 'Official SKR stake');
       await refreshWalletBalances(wallet);
-      await refreshStakedSkrBalance();
-      setStatus(`✅ SKR staked (${shortAddr(sig)})`);
+      if (Number.isFinite(parsedStakedSkrBalance)) {
+        setStakedSkrBalance((parsedStakedSkrBalance + amount).toFixed(6));
+      } else {
+        setStakedSkrBalance(amount.toFixed(6));
+      }
+      setStatus(`✅ Official SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
@@ -954,13 +868,30 @@ export default function App() {
 
       setSkrUnstakeBusy(true);
       setSkrErrorDetail('');
-      setStatus('Starting SKR unstake cooldown...');
+      setStatus('Building official SKR unstake transaction...');
+      const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
+      const built = await buildOfficialUnstakeTx({
+        naturalTokenAmount: amountText,
+        user: wallet,
+      });
+      const tx = decodeOfficialUnsignedTx(built.transaction);
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
+      if (sig) {
+        rememberTx(sig);
+        trackPendingTx(sig, 'Official SKR unstake request');
+      }
       const chainNowSec = await getChainNowSec();
       const unlockAtSec = chainNowSec + SKR_UNSTAKE_COOLDOWN_SECS;
       setSkrChainNowSec(chainNowSec);
       setSkrPendingUnstakeRaw(raw.toString());
       setSkrUnstakeUnlockAtSec(unlockAtSec);
-      setStatus(`⏳ Unstake requested. Withdraw unlocks in ${formatCountdown(SKR_UNSTAKE_COOLDOWN_SECS)}.`);
+      if (Number.isFinite(parsedStakedSkrBalance)) {
+        setStakedSkrBalance(Math.max(0, parsedStakedSkrBalance - amount).toFixed(6));
+      }
+      setStatus(
+        `⏳ Official unstake requested${sig ? ` (${shortAddr(sig)})` : ''}. Withdraw unlocks in ${formatCountdown(SKR_UNSTAKE_COOLDOWN_SECS)}.`
+      );
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR unstake error', e));
@@ -985,47 +916,25 @@ export default function App() {
         throw new Error(`Cooldown active. Time left: ${formatCountdown(skrUnstakeUnlockAtSec - chainNowSec)}.`);
       }
 
-      setStatus('Submitting SKR withdraw transfer...');
-
-      const ownerPk = asPublicKey(wallet);
-      const mintPk = asPublicKey(SKR_MINT);
-      const stakingSource = await resolveUserSkrVaultAccount(wallet);
-      if (!stakingSource.exists) throw new Error('No staked SKR found for this wallet yet.');
-      const tokenProgramId = stakingSource.tokenProgramId;
-      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk, true, tokenProgramId);
-
-      const tx = new Transaction();
-      tx.add(
-        createAssociatedTokenAccountIdempotentInstruction(
-          ownerPk,
-          ownerAta,
-          ownerPk,
-          mintPk,
-          tokenProgramId
-        )
-      );
-      tx.add(createTransferInstruction(stakingSource.tokenAccount, ownerAta, ownerPk, pendingUnstakeRawBig, [], tokenProgramId));
-
-      const latest = await connection.getLatestBlockhash('confirmed');
-      tx.recentBlockhash = latest.blockhash;
-      tx.lastValidBlockHeight = latest.lastValidBlockHeight;
-      tx.feePayer = ownerPk;
-
+      setStatus('Building official SKR withdraw transaction...');
+      const built = await buildOfficialWithdrawTx({
+        payer: wallet,
+        user: wallet,
+      });
+      const tx = decodeOfficialUnsignedTx(built.transaction);
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
       if (!sig) {
-        setStatus('SKR withdraw submitted in wallet. Signature unavailable; refresh shortly.');
+        setStatus('Official SKR withdraw submitted in wallet. Signature unavailable; refresh shortly.');
         await refreshWalletBalances(wallet);
-        await refreshStakedSkrBalance();
         return;
       }
       rememberTx(sig);
-      trackPendingTx(sig, 'SKR withdraw transfer');
+      trackPendingTx(sig, 'Official SKR withdraw');
       await refreshWalletBalances(wallet);
-      await refreshStakedSkrBalance();
       setSkrPendingUnstakeRaw('0');
       setSkrUnstakeUnlockAtSec(0);
-      setStatus(`✅ SKR withdrawn (${shortAddr(sig)})`);
+      setStatus(`✅ Official SKR withdrawn (${shortAddr(sig)})`);
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR withdraw error', e));
@@ -1176,11 +1085,9 @@ export default function App() {
       setSkrUnstakeUnlockAtSec(0);
       return;
     }
-    resolveUserSkrVaultAccount(wallet)
-      .then((v) => setSkrVaultAddress(v.tokenAccount.toBase58()))
-      .catch(() => setSkrVaultAddress('—'));
+    setSkrVaultAddress('stake.solanamobile.com');
     refreshStakedSkrBalance().catch(() => {});
-  }, [wallet, showSkrStaking, refreshStakedSkrBalance, resolveUserSkrVaultAccount]);
+  }, [wallet, showSkrStaking, refreshStakedSkrBalance]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -2567,6 +2474,15 @@ export default function App() {
           >
             <Text style={styles.gearIcon}>⚙️</Text>
           </Pressable>
+          <Pressable
+            onPress={() => {
+              setShowSettings(false);
+              setShowSkrStaking(true);
+            }}
+            style={styles.seekerBtnTopRight}
+          >
+            <Image source={seekerButtonImage} style={styles.seekerBtnImage} resizeMode="contain" />
+          </Pressable>
         </View>
 
         {showSettings && (
@@ -2616,8 +2532,8 @@ export default function App() {
         {showSkrStaking && (
           <View style={styles.confirmOverlay}>
             <View style={styles.skrStakeCard}>
-              <Text style={styles.skrStakeTitle}>SKR Staking</Text>
-              <Text style={styles.meta}>Vault account: {shortAddr(skrVaultAddress)}</Text>
+              <Text style={styles.skrStakeTitle}>SKR Staking (Official)</Text>
+              <Text style={styles.meta}>Source: {skrVaultAddress}</Text>
               <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
               <TextInput
                 style={[styles.input, styles.skrInput]}
@@ -2991,6 +2907,21 @@ const styles = StyleSheet.create({
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
+  },
+  seekerBtnTopRight: {
+    width: 44,
+    height: 44,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: colors.border,
+    backgroundColor: colors.panel,
+    alignItems: 'center',
+    justifyContent: 'center',
+    overflow: 'hidden',
+  },
+  seekerBtnImage: {
+    width: 34,
+    height: 34,
   },
   gearIcon: { fontSize: 18 },
   skrStakeCard: {
