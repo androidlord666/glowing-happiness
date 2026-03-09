@@ -55,7 +55,6 @@ import {
 const walletAdapter = createWalletAdapter();
 const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
 const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
-const seekerButtonImage = require('./src/assets/seeker-button.png');
 
 type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
@@ -2568,15 +2567,6 @@ export default function App() {
           >
             <Text style={styles.gearIcon}>⚙️</Text>
           </Pressable>
-          <Pressable
-            onPress={() => {
-              setShowSettings(false);
-              setShowSkrStaking(true);
-            }}
-            style={styles.seekerBtnTopRight}
-          >
-            <Image source={seekerButtonImage} style={styles.seekerBtnImage} resizeMode="contain" />
-          </Pressable>
         </View>
 
         {showSettings && (
@@ -2994,22 +2984,6 @@ const styles = StyleSheet.create({
     gap: 8,
     alignItems: 'flex-end',
     zIndex: 80,
-  },
-  seekerBtnTopRight: {
-    paddingVertical: 8,
-    paddingHorizontal: 8,
-    borderRadius: 10,
-    borderWidth: 1,
-    borderColor: '#3AD4CF',
-    backgroundColor: '#08343D',
-    width: 44,
-    height: 44,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  seekerBtnImage: {
-    width: 28,
-    height: 28,
   },
   gearBtnTopRight: {
     padding: 8,
