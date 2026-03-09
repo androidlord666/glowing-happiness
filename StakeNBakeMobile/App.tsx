@@ -711,9 +711,17 @@ export default function App() {
     }
   }, [connection, wallet, skrDecimals]);
 
+  const resolveSkrTokenProgramId = useCallback(async () => {
+    const mintPk = asPublicKey(SKR_MINT);
+    const mintInfo = await connection.getAccountInfo(mintPk, 'confirmed');
+    if (!mintInfo) throw new Error('SKR mint account not found on this cluster.');
+    return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+  }, [connection]);
+
   const resolveSkrStakingTokenAccount = useCallback(async () => {
     const stakingPk = asPublicKey(SKR_STAKING_ACCOUNT);
     const mintPk = asPublicKey(SKR_MINT);
+    const tokenProgramId = await resolveSkrTokenProgramId();
     const info = await connection.getParsedAccountInfo(stakingPk, 'confirmed').catch(() => null);
     const parsedInfo = (info?.value as any)?.data?.parsed?.info;
     const parsedMint = String(parsedInfo?.mint ?? '');
@@ -722,15 +730,17 @@ export default function App() {
       return {
         tokenAccount: stakingPk,
         authority: parsedOwner,
+        tokenProgramId,
         needsCreate: false,
       };
     }
     return {
-      tokenAccount: getAssociatedTokenAddressSync(mintPk, stakingPk),
+      tokenAccount: getAssociatedTokenAddressSync(mintPk, stakingPk, true, tokenProgramId),
       authority: SKR_STAKING_ACCOUNT,
+      tokenProgramId,
       needsCreate: true,
     };
-  }, [connection]);
+  }, [connection, resolveSkrTokenProgramId]);
 
   const onStakeSkr = async () => {
     if (skrStakeBusy) return;
@@ -748,22 +758,32 @@ export default function App() {
 
       const ownerPk = asPublicKey(wallet);
       const mintPk = asPublicKey(SKR_MINT);
-      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk);
       const stakingTarget = await resolveSkrStakingTokenAccount();
+      const tokenProgramId = stakingTarget.tokenProgramId;
+      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk, true, tokenProgramId);
 
       const tx = new Transaction();
-      tx.add(createAssociatedTokenAccountIdempotentInstruction(ownerPk, ownerAta, ownerPk, mintPk));
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          ownerPk,
+          ownerAta,
+          ownerPk,
+          mintPk,
+          tokenProgramId
+        )
+      );
       if (stakingTarget.needsCreate) {
         tx.add(
           createAssociatedTokenAccountIdempotentInstruction(
             ownerPk,
             stakingTarget.tokenAccount,
             asPublicKey(SKR_STAKING_ACCOUNT),
-            mintPk
+            mintPk,
+            tokenProgramId
           )
         );
       }
-      tx.add(createTransferInstruction(ownerAta, stakingTarget.tokenAccount, ownerPk, raw));
+      tx.add(createTransferInstruction(ownerAta, stakingTarget.tokenAccount, ownerPk, raw, [], tokenProgramId));
 
       const latest = await connection.getLatestBlockhash('confirmed');
       tx.recentBlockhash = latest.blockhash;
@@ -801,15 +821,24 @@ export default function App() {
 
       const ownerPk = asPublicKey(wallet);
       const mintPk = asPublicKey(SKR_MINT);
-      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk);
       const stakingSource = await resolveSkrStakingTokenAccount();
+      const tokenProgramId = stakingSource.tokenProgramId;
+      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk, true, tokenProgramId);
       if (stakingSource.authority !== wallet) {
         throw new Error(`Unstake requires staking authority wallet ${shortAddr(stakingSource.authority)} to be connected.`);
       }
 
       const tx = new Transaction();
-      tx.add(createAssociatedTokenAccountIdempotentInstruction(ownerPk, ownerAta, ownerPk, mintPk));
-      tx.add(createTransferInstruction(stakingSource.tokenAccount, ownerAta, ownerPk, raw));
+      tx.add(
+        createAssociatedTokenAccountIdempotentInstruction(
+          ownerPk,
+          ownerAta,
+          ownerPk,
+          mintPk,
+          tokenProgramId
+        )
+      );
+      tx.add(createTransferInstruction(stakingSource.tokenAccount, ownerAta, ownerPk, raw, [], tokenProgramId));
 
       const latest = await connection.getLatestBlockhash('confirmed');
       tx.recentBlockhash = latest.blockhash;
