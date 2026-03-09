@@ -865,9 +865,65 @@ export default function App() {
       if (!wallet) throw new Error('Wallet not connected');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
+      const owner = asPublicKey(wallet);
+      const mint = asPublicKey(SKR_MINT);
+      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+      const stakeRaw = BigInt(Math.round(amount * Math.pow(10, decimals)));
+      if (stakeRaw <= 0n) throw new Error('Amount too small');
 
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
+      setStatus('Checking SKR funding...');
+
+      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+      const mintAccounts = await connection.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+      const accountRows = mintAccounts.value.map((row) => {
+        const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
+        return {
+          pubkey: row.pubkey,
+          amountRaw,
+          isAta: row.pubkey.toBase58() === ownerAta.toBase58(),
+        };
+      });
+      const ataRaw = accountRows.find((row) => row.isAta)?.amountRaw ?? 0n;
+      const totalRaw = accountRows.reduce((sum, row) => sum + row.amountRaw, 0n);
+      if (totalRaw < stakeRaw) {
+        throw new Error(`Stake amount exceeds wallet balance (${formatRawAmount(totalRaw.toString(), decimals, 6)} SKR).`);
+      }
+
+      const neededForAta = stakeRaw > ataRaw ? stakeRaw - ataRaw : 0n;
+      if (neededForAta > 0n) {
+        setStatus('Preparing SKR funding account...');
+        const prepTx = new Transaction();
+        const recent = await connection.getLatestBlockhash('confirmed');
+        prepTx.recentBlockhash = recent.blockhash;
+        prepTx.lastValidBlockHeight = recent.lastValidBlockHeight;
+        prepTx.feePayer = owner;
+        prepTx.add(createAssociatedTokenAccountIdempotentInstruction(owner, ownerAta, owner, mint));
+
+        let remaining = neededForAta;
+        for (const row of accountRows.filter((entry) => !entry.isAta && entry.amountRaw > 0n)) {
+          if (remaining <= 0n) break;
+          const moveRaw = row.amountRaw > remaining ? remaining : row.amountRaw;
+          prepTx.add(createTransferInstruction(row.pubkey, ownerAta, owner, moveRaw));
+          remaining -= moveRaw;
+        }
+        if (remaining > 0n) {
+          throw new Error('Unable to prepare enough SKR in the staking source account.');
+        }
+
+        const prepSigs = await walletAdapter.signAndSendTransactions([prepTx]);
+        const prepSig = prepSigs.find((s) => typeof s === 'string' && s.length > 0);
+        if (!prepSig) {
+          throw new Error('Funding step submitted without signature. Refresh and retry.');
+        }
+        rememberTx(prepSig);
+        trackPendingTx(prepSig, 'SKR funding transfer');
+        setStatus(`Preparing SKR funding (${shortAddr(prepSig)})...`);
+        await connection.confirmTransaction(prepSig, 'confirmed').catch(() => null);
+        await refreshWalletBalances(wallet);
+      }
+
       setStatus('Building official SKR stake transaction...');
 
       const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
