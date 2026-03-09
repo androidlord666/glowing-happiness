@@ -132,13 +132,21 @@ function classifyError(e: any): 'user' | 'rpc' | 'wallet' | 'chain' | 'unknown' 
   if (raw.includes('429') || raw.includes('too many requests') || raw.includes('timeout') || raw.includes('network')) {
     return 'rpc';
   }
-  if (raw.includes('wallet') || raw.includes('auth') || raw.includes('sign')) {
+  if (raw.includes('authority') || raw.includes('unauthorized') || raw.includes('owner mismatch')) {
+    return 'chain';
+  }
+  if (raw.includes('wallet') || raw.includes('sign') || raw.includes('signature')) {
     return 'wallet';
   }
   if (raw.includes('insufficient') || raw.includes('invalid') || raw.includes('inactive') || raw.includes('stake account')) {
     return 'chain';
   }
   return 'unknown';
+}
+
+function isEmptySignatureError(e: any): boolean {
+  const raw = String(e?.message ?? e ?? '').toLowerCase();
+  return raw.includes('empty signature') || raw.includes('signature unavailable');
 }
 
 function normalizeErrorMessage(e: any): string {
@@ -445,7 +453,6 @@ export default function App() {
     () => formatRawAmount(pendingUnstakeRawBig.toString(), Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS, 6),
     [pendingUnstakeRawBig, skrDecimals]
   );
-  const parsedPendingUnstakeUi = useMemo(() => Number(pendingUnstakeUi), [pendingUnstakeUi]);
   const unstakeCooldownRemainingSec = useMemo(
     () => Math.max(0, skrUnstakeUnlockAtSec - skrChainNowSec),
     [skrUnstakeUnlockAtSec, skrChainNowSec]
@@ -453,13 +460,6 @@ export default function App() {
   const unstakeCooldownReady = useMemo(
     () => !!skrUnstakeUnlockAtSec && unstakeCooldownRemainingSec <= 0,
     [skrUnstakeUnlockAtSec, unstakeCooldownRemainingSec]
-  );
-  const parsedRequestableStaked = useMemo(
-    () => {
-      if (!Number.isFinite(parsedStakedSkrBalance)) return Number.NaN;
-      return Math.max(0, parsedStakedSkrBalance - (Number.isFinite(parsedPendingUnstakeUi) ? parsedPendingUnstakeUi : 0));
-    },
-    [parsedStakedSkrBalance, parsedPendingUnstakeUi]
   );
   const parsedSkrAmount = useMemo(() => Number(skrStakeAmount), [skrStakeAmount]);
   const skrAmountIsValid = useMemo(
@@ -470,12 +470,8 @@ export default function App() {
     () => Number.isFinite(parsedSkrBalance) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedSkrBalance,
     [parsedSkrBalance, parsedSkrAmount]
   );
-  const skrUnstakeAmountTooHigh = useMemo(
-    () => Number.isFinite(parsedRequestableStaked) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedRequestableStaked,
-    [parsedRequestableStaked, parsedSkrAmount]
-  );
   const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrStakeAmountTooHigh;
-  const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && pendingUnstakeRawBig === 0n && skrAmountIsValid && !skrUnstakeAmountTooHigh;
+  const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && pendingUnstakeRawBig === 0n && skrAmountIsValid;
   const canSubmitSkrWithdraw = !!wallet && !skrSubmitLock && pendingUnstakeRawBig > 0n && unstakeCooldownReady;
   const stakedSkrDisplay = useMemo(
     () => (stakedSkrBalance === '—' ? (skrRefreshBusy ? 'Refreshing...' : 'Loading...') : `${stakedSkrBalance} SKR`),
@@ -902,6 +898,13 @@ export default function App() {
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
       refreshStakedSkrBalance().catch(() => {});
     } catch (e: any) {
+      if (isEmptySignatureError(e)) {
+        suppressNextStatusModalRef.current = true;
+        setStatus('Official SKR stake submitted. Wallet returned no signature; refresh in a few seconds.');
+        refreshWalletBalances(wallet).catch(() => {});
+        refreshStakedSkrBalance().catch(() => {});
+        return;
+      }
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR stake error', e));
     } finally {
@@ -918,9 +921,6 @@ export default function App() {
       if (pendingUnstakeRawBig > 0n) throw new Error('Pending cooldown exists. Withdraw before requesting another unstake.');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
-      if (Number.isFinite(parsedRequestableStaked) && amount > parsedRequestableStaked) {
-        throw new Error(`Unstake amount exceeds available staked balance (${parsedRequestableStaked.toFixed(4)} SKR).`);
-      }
 
       const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
       const raw = BigInt(Math.round(amount * Math.pow(10, decimals)));
@@ -954,6 +954,13 @@ export default function App() {
       );
       refreshStakedSkrBalance().catch(() => {});
     } catch (e: any) {
+      if (isEmptySignatureError(e)) {
+        suppressNextStatusModalRef.current = true;
+        setStatus('Official SKR unstake submitted. Wallet returned no signature; refresh in a few seconds.');
+        refreshWalletBalances(wallet).catch(() => {});
+        refreshStakedSkrBalance().catch(() => {});
+        return;
+      }
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR unstake error', e));
     } finally {
@@ -998,6 +1005,13 @@ export default function App() {
       setStatus(`✅ Official SKR withdrawn (${shortAddr(sig)})`);
       refreshStakedSkrBalance().catch(() => {});
     } catch (e: any) {
+      if (isEmptySignatureError(e)) {
+        suppressNextStatusModalRef.current = true;
+        setStatus('Official SKR withdraw submitted. Wallet returned no signature; refresh in a few seconds.');
+        refreshWalletBalances(wallet).catch(() => {});
+        refreshStakedSkrBalance().catch(() => {});
+        return;
+      }
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
       setStatus(actionError('SKR withdraw error', e));
     } finally {
