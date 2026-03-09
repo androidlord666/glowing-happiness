@@ -53,6 +53,7 @@ import {
 const walletAdapter = createWalletAdapter();
 const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
 const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
+const seekerButtonImage = require('./src/assets/seeker-button.png');
 
 type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
@@ -83,7 +84,6 @@ const LOW_LATENCY_MODE = true;
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
 const SKR_STAKING_ACCOUNT = '4HQy82s9CHTv1GsYKnANHMiHfhcqesYkK6sB3RDSYyqw';
-const SEEKER_BUTTON_IMAGE = 'https://drive.google.com/uc?export=view&id=1I9D2lvxwN7KKUHcSLGJUiOwh__x6rFcm';
 const SKR_FALLBACK_DECIMALS = 6;
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
@@ -2412,7 +2412,7 @@ export default function App() {
             }}
             style={styles.seekerBtnTopRight}
           >
-            <Image source={{ uri: SEEKER_BUTTON_IMAGE }} style={styles.seekerBtnImage} resizeMode="contain" />
+            <Image source={seekerButtonImage} style={styles.seekerBtnImage} resizeMode="contain" />
           </Pressable>
         </View>
 
