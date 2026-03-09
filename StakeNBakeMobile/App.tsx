@@ -130,7 +130,16 @@ function classifyError(e: any): 'user' | 'rpc' | 'wallet' | 'chain' | 'unknown' 
   if (raw.includes('cancel') || raw.includes('declin') || raw.includes('rejected') || raw.includes('user denied') || raw.includes('user aborted')) {
     return 'user';
   }
-  if (raw.includes('429') || raw.includes('too many requests') || raw.includes('timeout') || raw.includes('network')) {
+  if (
+    raw.includes('429') ||
+    raw.includes('too many requests') ||
+    raw.includes('timeout') ||
+    raw.includes('network') ||
+    raw.includes('json-rpc code: -32052') ||
+    (raw.includes('api key') && raw.includes('not allowed')) ||
+    raw.includes('rest code: 403') ||
+    raw.includes('forbidden')
+  ) {
     return 'rpc';
   }
   if (raw.includes('authority') || raw.includes('unauthorized') || raw.includes('owner mismatch')) {
@@ -1369,9 +1378,10 @@ export default function App() {
         .catch(() => {});
     } catch (e: any) {
       const raw = String(e?.message ?? e ?? '').toLowerCase();
-      if (raw.includes('429') || raw.includes('too many requests')) {
+      if (classifyError(e) === 'rpc' || raw.includes('429') || raw.includes('too many requests')) {
         setRpcHealth('degraded');
-        setStatus('RPC busy/rate-limited. Retry now.');
+        suppressNextStatusModalRef.current = true;
+        setStatus('Refresh temporarily unavailable (RPC access restricted). Core actions still work.');
         if (lastStakeAccountsRef.current.length) {
           setStakeAccounts(lastStakeAccountsRef.current);
         }
