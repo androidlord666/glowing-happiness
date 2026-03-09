@@ -81,6 +81,7 @@ const LOW_LATENCY_MODE = true;
 
 const PLATFORM_FEE_WALLET = 'FeYxe8Up4bCpXtF168avXtCUKk18gsAh4Z6zz1QAZNnr';
 const SKR_MINT = 'SKRbvo6Gf7GondiT3BbTfuRDPqLWei4j2Qy2NPGZhW3';
+const SKR_STAKING_ACCOUNT = '4HQy82s9CHTv1GsYKnANHMiHfhcqesYkK6sB3RDSYyqw';
 const SKR_FALLBACK_DECIMALS = 6;
 const SOL_MINT = 'So11111111111111111111111111111111111111112';
 const JUPITER_API_KEY = 'dbb47dbc-a5f8-44f6-ae14-291942c1723d';
@@ -306,6 +307,7 @@ export default function App() {
   const [cluster, _setCluster] = useState<ClusterName>(DEFAULT_CLUSTER);
   const [explorer, setExplorer] = useState<ExplorerName>(DEFAULT_EXPLORER);
   const [showSettings, setShowSettings] = useState(false);
+  const [showSkrStaking, setShowSkrStaking] = useState(false);
   const [showExplorerOptions, setShowExplorerOptions] = useState(false);
   const [stakeAccounts, setStakeAccounts] = useState<StakeAccountInfo[]>([]);
   const [selected, setSelected] = useState<Record<string, boolean>>({});
@@ -338,6 +340,9 @@ export default function App() {
   const [connectBusy, setConnectBusy] = useState(false);
   const [stakeBusy, setStakeBusy] = useState(false);
   const [unstakeBusy, setUnstakeBusy] = useState(false);
+  const [skrStakeAmount, setSkrStakeAmount] = useState('10');
+  const [skrStakeBusy, setSkrStakeBusy] = useState(false);
+  const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
   const [consolidateBusy, setConsolidateBusy] = useState(false);
   const [sendBusy, setSendBusy] = useState(false);
@@ -378,7 +383,8 @@ export default function App() {
     };
 
   const explorerLabel = explorer === 'orbmarkets' ? 'OrbMarkets.io' : explorer === 'solscan' ? 'Solscan.io' : 'Explorer.Solana.com';
-  const anyActionBusy = connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy;
+  const anyActionBusy =
+    connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy || skrStakeBusy || skrUnstakeBusy;
 
   const connection = useMemo(() => createConnection(cluster), [cluster]);
 
@@ -689,6 +695,126 @@ export default function App() {
       // keep last-known balances to avoid flicker/disappearing values
     }
   }, [connection, wallet, skrDecimals]);
+
+  const resolveSkrStakingTokenAccount = useCallback(async () => {
+    const stakingPk = asPublicKey(SKR_STAKING_ACCOUNT);
+    const mintPk = asPublicKey(SKR_MINT);
+    const info = await connection.getParsedAccountInfo(stakingPk, 'confirmed').catch(() => null);
+    const parsedInfo = (info?.value as any)?.data?.parsed?.info;
+    const parsedMint = String(parsedInfo?.mint ?? '');
+    const parsedOwner = String(parsedInfo?.owner ?? '');
+    if (parsedMint === SKR_MINT && parsedOwner) {
+      return {
+        tokenAccount: stakingPk,
+        authority: parsedOwner,
+        needsCreate: false,
+      };
+    }
+    return {
+      tokenAccount: getAssociatedTokenAddressSync(mintPk, stakingPk),
+      authority: SKR_STAKING_ACCOUNT,
+      needsCreate: true,
+    };
+  }, [connection]);
+
+  const onStakeSkr = async () => {
+    if (skrStakeBusy) return;
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      const amount = Number(skrStakeAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
+
+      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+      const raw = BigInt(Math.round(amount * Math.pow(10, decimals)));
+      if (raw <= 0n) throw new Error('Amount too small');
+
+      setSkrStakeBusy(true);
+      setStatus('Submitting SKR stake transfer...');
+
+      const ownerPk = asPublicKey(wallet);
+      const mintPk = asPublicKey(SKR_MINT);
+      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk);
+      const stakingTarget = await resolveSkrStakingTokenAccount();
+
+      const tx = new Transaction();
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(ownerPk, ownerAta, ownerPk, mintPk));
+      if (stakingTarget.needsCreate) {
+        tx.add(
+          createAssociatedTokenAccountIdempotentInstruction(
+            ownerPk,
+            stakingTarget.tokenAccount,
+            asPublicKey(SKR_STAKING_ACCOUNT),
+            mintPk
+          )
+        );
+      }
+      tx.add(createTransferInstruction(ownerAta, stakingTarget.tokenAccount, ownerPk, raw));
+
+      const latest = await connection.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = latest.blockhash;
+      tx.lastValidBlockHeight = latest.lastValidBlockHeight;
+      tx.feePayer = ownerPk;
+
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      const sig = sigs[0];
+      if (!sig) throw new Error('Wallet returned empty signature');
+      rememberTx(sig);
+      trackPendingTx(sig, 'SKR stake transfer');
+      await refreshWalletBalances(wallet);
+      setStatus(`✅ SKR staked (${shortAddr(sig)})`);
+      loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+    } catch (e: any) {
+      setStatus(actionError('SKR stake error', e));
+    } finally {
+      setSkrStakeBusy(false);
+    }
+  };
+
+  const onUnstakeSkr = async () => {
+    if (skrUnstakeBusy) return;
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      const amount = Number(skrStakeAmount);
+      if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
+
+      const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
+      const raw = BigInt(Math.round(amount * Math.pow(10, decimals)));
+      if (raw <= 0n) throw new Error('Amount too small');
+
+      setSkrUnstakeBusy(true);
+      setStatus('Submitting SKR unstake transfer...');
+
+      const ownerPk = asPublicKey(wallet);
+      const mintPk = asPublicKey(SKR_MINT);
+      const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk);
+      const stakingSource = await resolveSkrStakingTokenAccount();
+      if (stakingSource.authority !== wallet) {
+        throw new Error(`Unstake requires staking authority wallet ${shortAddr(stakingSource.authority)} to be connected.`);
+      }
+
+      const tx = new Transaction();
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(ownerPk, ownerAta, ownerPk, mintPk));
+      tx.add(createTransferInstruction(stakingSource.tokenAccount, ownerAta, ownerPk, raw));
+
+      const latest = await connection.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = latest.blockhash;
+      tx.lastValidBlockHeight = latest.lastValidBlockHeight;
+      tx.feePayer = ownerPk;
+
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      const sig = sigs[0];
+      if (!sig) throw new Error('Wallet returned empty signature');
+      rememberTx(sig);
+      trackPendingTx(sig, 'SKR unstake transfer');
+      await refreshWalletBalances(wallet);
+      setStatus(`✅ SKR unstaked (${shortAddr(sig)})`);
+      loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+    } catch (e: any) {
+      setStatus(actionError('SKR unstake error', e));
+    } finally {
+      setSkrUnstakeBusy(false);
+    }
+  };
 
   const applyStakeAccountsToUi = useCallback((items: StakeAccountInfo[], options?: { fromCache?: boolean }) => {
     lastStakeAccountsRef.current = items;
@@ -2225,9 +2351,26 @@ export default function App() {
         )}
         </ScrollView>
 
-        <Pressable onPress={() => setShowSettings((v) => !v)} style={styles.gearBtnTopRight}>
-          <Text style={styles.gearIcon}>⚙️</Text>
-        </Pressable>
+        <View style={styles.topRightButtons}>
+          <Pressable
+            onPress={() => {
+              setShowSettings(false);
+              setShowSkrStaking(true);
+            }}
+            style={styles.skrBtnTopRight}
+          >
+            <Text style={styles.skrBtnTopRightText}>SKR</Text>
+          </Pressable>
+          <Pressable
+            onPress={() => {
+              setShowSkrStaking(false);
+              setShowSettings((v) => !v);
+            }}
+            style={styles.gearBtnTopRight}
+          >
+            <Text style={styles.gearIcon}>⚙️</Text>
+          </Pressable>
+        </View>
 
         {showSettings && (
           <View style={[styles.settingsSheet, { backgroundColor: palette.panel, borderColor: palette.border }]}>
@@ -2272,6 +2415,49 @@ export default function App() {
 
         </View>
       )}
+
+        {showSkrStaking && (
+          <View style={styles.confirmOverlay}>
+            <View style={styles.skrStakeCard}>
+              <Text style={styles.skrStakeTitle}>SKR Staking</Text>
+              <Text style={styles.meta}>Stake account: {shortAddr(SKR_STAKING_ACCOUNT)}</Text>
+              <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
+              <TextInput
+                style={[styles.input, styles.skrInput]}
+                placeholder="Amount SKR"
+                placeholderTextColor="#8BB9C8"
+                value={skrStakeAmount}
+                onChangeText={setSkrStakeAmount}
+                keyboardType="decimal-pad"
+              />
+              <View style={styles.skrActionRow}>
+                <Pressable
+                  onPress={onStakeSkr}
+                  disabled={skrStakeBusy || !wallet}
+                  style={({ pressed }) => [
+                    styles.skrActionBtn,
+                    (pressed || skrStakeBusy || !wallet) && styles.skrActionBtnPressed,
+                  ]}
+                >
+                  <Text style={styles.skrActionBtnText}>{skrStakeBusy ? 'Staking…' : 'Stake SKR'}</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onUnstakeSkr}
+                  disabled={skrUnstakeBusy || !wallet}
+                  style={({ pressed }) => [
+                    styles.skrActionBtn,
+                    (pressed || skrUnstakeBusy || !wallet) && styles.skrActionBtnPressed,
+                  ]}
+                >
+                  <Text style={styles.skrActionBtnText}>{skrUnstakeBusy ? 'Unstaking…' : 'Unstake SKR'}</Text>
+                </Pressable>
+              </View>
+              <Pressable onPress={() => setShowSkrStaking(false)} style={styles.skrCloseBtn}>
+                <Text style={styles.skrCloseBtnText}>Close</Text>
+              </Pressable>
+            </View>
+          </View>
+        )}
 
         {confirmConsolidate && (
           <View style={styles.confirmOverlay}>
@@ -2491,18 +2677,91 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 4 },
   headerLogo: { width: 240, height: 40 },
-  gearBtnTopRight: {
+  topRightButtons: {
     position: 'absolute',
     right: 14,
     top: 14,
+    gap: 8,
+    alignItems: 'flex-end',
+    zIndex: 80,
+  },
+  skrBtnTopRight: {
+    paddingVertical: 8,
+    paddingHorizontal: 12,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: '#3AD4CF',
+    backgroundColor: '#08343D',
+  },
+  skrBtnTopRightText: {
+    fontSize: 13,
+    fontWeight: '800',
+    color: '#7AE8E5',
+    letterSpacing: 0.3,
+  },
+  gearBtnTopRight: {
     padding: 8,
     borderRadius: 10,
     borderWidth: 1,
     borderColor: colors.border,
     backgroundColor: colors.panel,
-    zIndex: 80,
   },
   gearIcon: { fontSize: 18 },
+  skrStakeCard: {
+    width: '100%',
+    maxWidth: 420,
+    backgroundColor: '#071E25',
+    borderColor: '#2CBFC0',
+    borderWidth: 1,
+    borderRadius: 14,
+    padding: 14,
+    gap: 10,
+  },
+  skrStakeTitle: {
+    color: '#80F3F0',
+    fontWeight: '800',
+    fontSize: 18,
+  },
+  skrInput: {
+    backgroundColor: '#0B2A34',
+    borderColor: '#2CBFC0',
+    color: '#D9FBFA',
+  },
+  skrActionRow: {
+    flexDirection: 'row',
+    gap: 8,
+  },
+  skrActionBtn: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: '#2CBFC0',
+    backgroundColor: '#18C7BE',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  skrActionBtnPressed: {
+    opacity: 0.86,
+    transform: [{ scale: 0.98 }],
+  },
+  skrActionBtnText: {
+    color: '#07333B',
+    fontWeight: '800',
+  },
+  skrCloseBtn: {
+    borderWidth: 1,
+    borderColor: '#2CBFC0',
+    borderRadius: 10,
+    paddingVertical: 10,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0F3340',
+  },
+  skrCloseBtnText: {
+    color: '#8AF1EF',
+    fontWeight: '700',
+  },
   settingsSheet: {
     position: 'absolute',
     left: 12,
