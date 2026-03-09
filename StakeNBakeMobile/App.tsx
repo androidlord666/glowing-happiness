@@ -126,7 +126,7 @@ function normalizeErrorMessage(e: any): string {
   const raw = String(e?.message ?? e ?? 'unknown error');
   const kind = classifyError(e);
   if (kind === 'user') return 'Transaction cancelled by user.';
-  if (kind === 'rpc') return 'please wait, rpc 😎🙏';
+  if (kind === 'rpc') return 'RPC busy/rate-limited. Retry now.';
   if (kind === 'wallet') return `Wallet issue: ${raw}`;
   if (kind === 'chain') return `Chain/state issue: ${raw}`;
   return raw;
@@ -376,6 +376,8 @@ export default function App() {
   const refreshMetricsRef = useRef({ count: 0, totalMs: 0 });
   const consolidationInFlightRef = useRef(false);
   const consolidationIdempotencyRef = useRef<Record<string, number>>({});
+  const skrTokenProgramIdRef = useRef<PublicKey | null>(null);
+  const skrTokenProgramResolvedAtRef = useRef(0);
 
   const palette = theme === 'dark'
     ? colors
@@ -714,21 +716,41 @@ export default function App() {
   }, [connection, wallet, skrDecimals]);
 
   const resolveSkrTokenProgramId = useCallback(async () => {
+    const cached = skrTokenProgramIdRef.current;
+    const now = Date.now();
+    if (cached && now - skrTokenProgramResolvedAtRef.current < 10 * 60 * 1000) {
+      return cached;
+    }
     const mintPk = asPublicKey(SKR_MINT);
-    const mintInfo = await connection.getAccountInfo(mintPk, 'confirmed');
-    if (!mintInfo) throw new Error('SKR mint account not found on this cluster.');
-    return mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    let mintInfo = await connection.getAccountInfo(mintPk, 'processed').catch(() => null);
+    if (!mintInfo) {
+      mintInfo = await connection.getAccountInfo(mintPk, 'confirmed').catch(() => null);
+    }
+    if (!mintInfo) {
+      if (cached) return cached;
+      return TOKEN_PROGRAM_ID;
+    }
+    const resolved = mintInfo.owner.equals(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+    skrTokenProgramIdRef.current = resolved;
+    skrTokenProgramResolvedAtRef.current = now;
+    return resolved;
   }, [connection]);
 
   const resolveSkrStakingTokenAccount = useCallback(async () => {
     const stakingPk = asPublicKey(SKR_STAKING_ACCOUNT);
     const mintPk = asPublicKey(SKR_MINT);
-    const tokenProgramId = await resolveSkrTokenProgramId();
-    const info = await connection.getParsedAccountInfo(stakingPk, 'confirmed').catch(() => null);
+    const info =
+      (await connection.getParsedAccountInfo(stakingPk, 'processed').catch(() => null)) ??
+      (await connection.getParsedAccountInfo(stakingPk, 'confirmed').catch(() => null));
     const parsedInfo = (info?.value as any)?.data?.parsed?.info;
     const parsedMint = String(parsedInfo?.mint ?? '').trim();
     const parsedOwner = String(parsedInfo?.owner ?? parsedInfo?.authority ?? '').trim();
     if (parsedMint === SKR_MINT && parsedOwner) {
+      const ownerProgram = (info?.value as any)?.owner;
+      const tokenProgramId =
+        ownerProgram?.equals?.(TOKEN_2022_PROGRAM_ID) ? TOKEN_2022_PROGRAM_ID : TOKEN_PROGRAM_ID;
+      skrTokenProgramIdRef.current = tokenProgramId;
+      skrTokenProgramResolvedAtRef.current = Date.now();
       return {
         tokenAccount: stakingPk,
         authority: parsedOwner,
@@ -736,6 +758,7 @@ export default function App() {
         needsCreate: false,
       };
     }
+    const tokenProgramId = await resolveSkrTokenProgramId();
     return {
       tokenAccount: getAssociatedTokenAddressSync(mintPk, stakingPk, true, tokenProgramId),
       authority: SKR_STAKING_ACCOUNT,
@@ -844,12 +867,6 @@ export default function App() {
       const stakingSource = await resolveSkrStakingTokenAccount();
       const tokenProgramId = stakingSource.tokenProgramId;
       const ownerAta = getAssociatedTokenAddressSync(mintPk, ownerPk, true, tokenProgramId);
-      const sourceAuthority = asPublicKey(stakingSource.authority);
-      if (!sourceAuthority.equals(ownerPk)) {
-        throw new Error(
-          `Unstake requires staking authority wallet ${shortAddr(sourceAuthority.toBase58())}. Connected: ${shortAddr(ownerPk.toBase58())}.`
-        );
-      }
 
       const tx = new Transaction();
       tx.add(
@@ -1013,10 +1030,10 @@ export default function App() {
     if (!wallet || !isAppActive) return;
     const t = setInterval(() => {
       refreshWalletBalances(wallet).catch(() => {});
-      refreshStakedSkrBalance().catch(() => {});
-    }, 7000);
+      if (showSkrStaking) refreshStakedSkrBalance().catch(() => {});
+    }, 12000);
     return () => clearInterval(t);
-  }, [wallet, isAppActive, refreshWalletBalances, refreshStakedSkrBalance]);
+  }, [wallet, isAppActive, refreshWalletBalances, refreshStakedSkrBalance, showSkrStaking]);
 
   useEffect(() => {
     if (!wallet) {
