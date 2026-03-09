@@ -62,7 +62,7 @@ type Screen = 'splash' | 'landing' | 'app';
 type ThemeMode = 'dark' | 'light';
 type RpcHealth = 'healthy' | 'degraded';
 type SourceFilter = 'all' | 'high' | 'low';
-type SkrConfirmAction = 'stake' | 'unstake';
+type SkrConfirmAction = 'stake' | 'unstake' | 'withdraw';
 type TxLifecycleStage = 'prepared' | 'sign_requested' | 'submitted' | 'confirmed' | 'failed';
 type ConsolidationBatchChunkSize = 2 | 3 | 4;
 
@@ -96,14 +96,28 @@ const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
 const TX_LIFECYCLE_STORAGE_KEY = '@staking_with_solana_mobile:txLifecycleEvents:v1';
 const STAKE_SNAPSHOT_CACHE_PREFIX = '@staking_with_solana_mobile:stakeSnapshot:v1';
 const SKR_USER_VAULT_SEED = 'skr-vault-v1';
+const SKR_UNSTAKE_COOLDOWN_SECS = 48 * 60 * 60;
+const SKR_COOLDOWN_CACHE_PREFIX = '@staking_with_solana_mobile:skrCooldown:v1';
 
 function getStakeSnapshotCacheKey(cluster: ClusterName, wallet: string): string {
   return `${STAKE_SNAPSHOT_CACHE_PREFIX}:${cluster}:${wallet}`;
 }
 
+function getSkrCooldownCacheKey(cluster: ClusterName, wallet: string): string {
+  return `${SKR_COOLDOWN_CACHE_PREFIX}:${cluster}:${wallet}`;
+}
+
 function shortAddr(v: string) {
   if (!v) return '';
   return `${v.slice(0, 6)}...${v.slice(-6)}`;
+}
+
+function formatCountdown(totalSeconds: number): string {
+  const secs = Math.max(0, Math.floor(totalSeconds));
+  const h = Math.floor(secs / 3600).toString().padStart(2, '0');
+  const m = Math.floor((secs % 3600) / 60).toString().padStart(2, '0');
+  const s = Math.floor(secs % 60).toString().padStart(2, '0');
+  return `${h}:${m}:${s}`;
 }
 
 function classifyError(e: any): 'user' | 'rpc' | 'wallet' | 'chain' | 'unknown' {
@@ -348,7 +362,11 @@ export default function App() {
   const [skrStakeAmount, setSkrStakeAmount] = useState('10');
   const [skrStakeBusy, setSkrStakeBusy] = useState(false);
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
+  const [skrWithdrawBusy, setSkrWithdrawBusy] = useState(false);
   const [skrSubmitLock, setSkrSubmitLock] = useState(false);
+  const [skrPendingUnstakeRaw, setSkrPendingUnstakeRaw] = useState('0');
+  const [skrUnstakeUnlockAtSec, setSkrUnstakeUnlockAtSec] = useState(0);
+  const [skrChainNowSec, setSkrChainNowSec] = useState(0);
   const [skrConfirmAction, setSkrConfirmAction] = useState<SkrConfirmAction>('stake');
   const [showSkrTxConfirm, setShowSkrTxConfirm] = useState(false);
   const [withdrawBusy, setWithdrawBusy] = useState(false);
@@ -395,10 +413,34 @@ export default function App() {
 
   const explorerLabel = explorer === 'orbmarkets' ? 'OrbMarkets.io' : explorer === 'solscan' ? 'Solscan.io' : 'Explorer.Solana.com';
   const anyActionBusy =
-    connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy || skrStakeBusy || skrUnstakeBusy;
+    connectBusy || stakeBusy || unstakeBusy || withdrawBusy || consolidateBusy || sendBusy || swapBusy || skrStakeBusy || skrUnstakeBusy || skrWithdrawBusy;
 
   const parsedSkrBalance = useMemo(() => Number(String(walletSkrBalance).replace(/,/g, '')), [walletSkrBalance]);
   const parsedStakedSkrBalance = useMemo(() => Number(String(stakedSkrBalance).replace(/,/g, '')), [stakedSkrBalance]);
+  const pendingUnstakeRawBig = useMemo(() => {
+    try {
+      return BigInt(skrPendingUnstakeRaw || '0');
+    } catch {
+      return 0n;
+    }
+  }, [skrPendingUnstakeRaw]);
+  const pendingUnstakeUi = useMemo(
+    () => formatRawAmount(pendingUnstakeRawBig.toString(), Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS, 6),
+    [pendingUnstakeRawBig, skrDecimals]
+  );
+  const parsedPendingUnstakeUi = useMemo(() => Number(pendingUnstakeUi), [pendingUnstakeUi]);
+  const unstakeCooldownRemainingSec = useMemo(
+    () => Math.max(0, skrUnstakeUnlockAtSec - skrChainNowSec),
+    [skrUnstakeUnlockAtSec, skrChainNowSec]
+  );
+  const unstakeCooldownReady = useMemo(
+    () => !!skrUnstakeUnlockAtSec && unstakeCooldownRemainingSec <= 0,
+    [skrUnstakeUnlockAtSec, unstakeCooldownRemainingSec]
+  );
+  const parsedRequestableStaked = useMemo(
+    () => Math.max(0, (Number.isFinite(parsedStakedSkrBalance) ? parsedStakedSkrBalance : 0) - (Number.isFinite(parsedPendingUnstakeUi) ? parsedPendingUnstakeUi : 0)),
+    [parsedStakedSkrBalance, parsedPendingUnstakeUi]
+  );
   const parsedSkrAmount = useMemo(() => Number(skrStakeAmount), [skrStakeAmount]);
   const skrAmountIsValid = useMemo(
     () => Number.isFinite(parsedSkrAmount) && parsedSkrAmount > 0,
@@ -409,11 +451,12 @@ export default function App() {
     [parsedSkrBalance, parsedSkrAmount]
   );
   const skrUnstakeAmountTooHigh = useMemo(
-    () => Number.isFinite(parsedStakedSkrBalance) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedStakedSkrBalance,
-    [parsedStakedSkrBalance, parsedSkrAmount]
+    () => Number.isFinite(parsedRequestableStaked) && Number.isFinite(parsedSkrAmount) && parsedSkrAmount > parsedRequestableStaked,
+    [parsedRequestableStaked, parsedSkrAmount]
   );
   const canSubmitSkrStake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrStakeAmountTooHigh;
-  const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && skrAmountIsValid && !skrUnstakeAmountTooHigh;
+  const canSubmitSkrUnstake = !!wallet && !skrSubmitLock && pendingUnstakeRawBig === 0n && skrAmountIsValid && !skrUnstakeAmountTooHigh;
+  const canSubmitSkrWithdraw = !!wallet && !skrSubmitLock && pendingUnstakeRawBig > 0n && unstakeCooldownReady;
   const skrBalanceAfterStake = useMemo(() => {
     if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
     return Math.max(0, parsedSkrBalance - Math.max(0, parsedSkrAmount)).toFixed(4);
@@ -771,6 +814,17 @@ export default function App() {
     };
   }, [connection, resolveSkrTokenProgramId, wallet]);
 
+  const getChainNowSec = useCallback(async () => {
+    const slot =
+      (await connection.getSlot('processed').catch(() => null)) ??
+      (await connection.getSlot('confirmed').catch(() => null));
+    if (slot == null) return Math.floor(Date.now() / 1000);
+    const blockTime =
+      (await connection.getBlockTime(slot).catch(() => null)) ??
+      (await connection.getBlockTime(Math.max(0, slot - 1)).catch(() => null));
+    return blockTime ?? Math.floor(Date.now() / 1000);
+  }, [connection]);
+
   const refreshStakedSkrBalance = useCallback(async () => {
     try {
       if (!wallet) {
@@ -888,10 +942,11 @@ export default function App() {
     setSkrSubmitLock(true);
     try {
       if (!wallet) throw new Error('Wallet not connected');
+      if (pendingUnstakeRawBig > 0n) throw new Error('Pending cooldown exists. Withdraw before requesting another unstake.');
       const amount = Number(skrStakeAmount);
       if (!Number.isFinite(amount) || amount <= 0) throw new Error('Enter a valid SKR amount');
-      if (Number.isFinite(parsedStakedSkrBalance) && amount > parsedStakedSkrBalance) {
-        throw new Error(`Unstake amount exceeds staked balance (${stakedSkrBalance} SKR).`);
+      if (Number.isFinite(parsedRequestableStaked) && amount > parsedRequestableStaked) {
+        throw new Error(`Unstake amount exceeds available staked balance (${parsedRequestableStaked.toFixed(4)} SKR).`);
       }
 
       const decimals = Number.isFinite(skrDecimals) ? skrDecimals : SKR_FALLBACK_DECIMALS;
@@ -900,7 +955,38 @@ export default function App() {
 
       setSkrUnstakeBusy(true);
       setSkrErrorDetail('');
-      setStatus('Submitting SKR unstake transfer...');
+      setStatus('Starting SKR unstake cooldown...');
+      const chainNowSec = await getChainNowSec();
+      const unlockAtSec = chainNowSec + SKR_UNSTAKE_COOLDOWN_SECS;
+      setSkrChainNowSec(chainNowSec);
+      setSkrPendingUnstakeRaw(raw.toString());
+      setSkrUnstakeUnlockAtSec(unlockAtSec);
+      setStatus(`⏳ Unstake requested. Withdraw unlocks in ${formatCountdown(SKR_UNSTAKE_COOLDOWN_SECS)}.`);
+    } catch (e: any) {
+      setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
+      setStatus(actionError('SKR unstake error', e));
+    } finally {
+      setSkrUnstakeBusy(false);
+      setSkrSubmitLock(false);
+    }
+  };
+
+  const onWithdrawSkr = async () => {
+    if (skrWithdrawBusy || skrSubmitLock) return;
+    setSkrSubmitLock(true);
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      if (pendingUnstakeRawBig <= 0n) throw new Error('No pending unstake amount.');
+      setSkrWithdrawBusy(true);
+      setSkrErrorDetail('');
+
+      const chainNowSec = await getChainNowSec();
+      setSkrChainNowSec(chainNowSec);
+      if (chainNowSec < skrUnstakeUnlockAtSec) {
+        throw new Error(`Cooldown active. Time left: ${formatCountdown(skrUnstakeUnlockAtSec - chainNowSec)}.`);
+      }
+
+      setStatus('Submitting SKR withdraw transfer...');
 
       const ownerPk = asPublicKey(wallet);
       const mintPk = asPublicKey(SKR_MINT);
@@ -919,7 +1005,7 @@ export default function App() {
           tokenProgramId
         )
       );
-      tx.add(createTransferInstruction(stakingSource.tokenAccount, ownerAta, ownerPk, raw, [], tokenProgramId));
+      tx.add(createTransferInstruction(stakingSource.tokenAccount, ownerAta, ownerPk, pendingUnstakeRawBig, [], tokenProgramId));
 
       const latest = await connection.getLatestBlockhash('confirmed');
       tx.recentBlockhash = latest.blockhash;
@@ -929,22 +1015,23 @@ export default function App() {
       const sigs = await walletAdapter.signAndSendTransactions([tx]);
       const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
       if (!sig) {
-        setStatus('SKR unstake submitted in wallet. Signature unavailable; refresh shortly.');
+        setStatus('SKR withdraw submitted in wallet. Signature unavailable; refresh shortly.');
         await refreshWalletBalances(wallet);
         await refreshStakedSkrBalance();
         return;
       }
       rememberTx(sig);
-      trackPendingTx(sig, 'SKR unstake transfer');
+      trackPendingTx(sig, 'SKR withdraw transfer');
       await refreshWalletBalances(wallet);
       await refreshStakedSkrBalance();
-      setStatus(`✅ SKR unstaked (${shortAddr(sig)})`);
-      loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
+      setSkrPendingUnstakeRaw('0');
+      setSkrUnstakeUnlockAtSec(0);
+      setStatus(`✅ SKR withdrawn (${shortAddr(sig)})`);
     } catch (e: any) {
       setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
-      setStatus(actionError('SKR unstake error', e));
+      setStatus(actionError('SKR withdraw error', e));
     } finally {
-      setSkrUnstakeBusy(false);
+      setSkrWithdrawBusy(false);
       setSkrSubmitLock(false);
     }
   };
@@ -1086,6 +1173,8 @@ export default function App() {
     if (!wallet) {
       setStakedSkrBalance('—');
       setSkrVaultAddress('—');
+      setSkrPendingUnstakeRaw('0');
+      setSkrUnstakeUnlockAtSec(0);
       return;
     }
     resolveUserSkrVaultAccount(wallet)
@@ -1093,6 +1182,48 @@ export default function App() {
       .catch(() => setSkrVaultAddress('—'));
     refreshStakedSkrBalance().catch(() => {});
   }, [wallet, showSkrStaking, refreshStakedSkrBalance, resolveUserSkrVaultAccount]);
+
+  useEffect(() => {
+    if (!wallet) return;
+    const key = getSkrCooldownCacheKey(cluster, wallet);
+    AsyncStorage.getItem(key)
+      .then((raw) => {
+        if (!raw) return;
+        const parsed = JSON.parse(raw);
+        const pendingRaw = String(parsed?.pendingRaw ?? '0');
+        const unlockAtSec = Number(parsed?.unlockAtSec ?? 0);
+        setSkrPendingUnstakeRaw(pendingRaw);
+        setSkrUnstakeUnlockAtSec(Number.isFinite(unlockAtSec) ? unlockAtSec : 0);
+      })
+      .catch(() => {});
+  }, [cluster, wallet]);
+
+  useEffect(() => {
+    if (!wallet) return;
+    const key = getSkrCooldownCacheKey(cluster, wallet);
+    AsyncStorage.setItem(
+      key,
+      JSON.stringify({
+        pendingRaw: skrPendingUnstakeRaw,
+        unlockAtSec: skrUnstakeUnlockAtSec,
+      })
+    ).catch(() => {});
+  }, [cluster, wallet, skrPendingUnstakeRaw, skrUnstakeUnlockAtSec]);
+
+  useEffect(() => {
+    if (!wallet || !isAppActive) return;
+    let cancelled = false;
+    const tick = async () => {
+      const nowSec = await getChainNowSec().catch(() => Math.floor(Date.now() / 1000));
+      if (!cancelled) setSkrChainNowSec(nowSec);
+    };
+    tick();
+    const t = setInterval(tick, 15000);
+    return () => {
+      cancelled = true;
+      clearInterval(t);
+    };
+  }, [wallet, isAppActive, getChainNowSec]);
 
   useEffect(() => {
     if (!isAppActive) return;
@@ -2520,15 +2651,22 @@ export default function App() {
                 <Text style={styles.meta}>Wallet SKR: {walletSkrBalance}</Text>
               </View>
               <Text style={styles.meta}>Staked SKR: {stakedSkrBalance}</Text>
+              <Text style={styles.meta}>Pending Unstake: {pendingUnstakeUi} SKR</Text>
+              <Text style={styles.meta}>
+                Cooldown: {skrUnstakeUnlockAtSec ? (unstakeCooldownReady ? 'Ready to withdraw' : formatCountdown(unstakeCooldownRemainingSec)) : 'No active cooldown'}
+              </Text>
               {skrStakeAmountTooHigh && (
                 <Text style={styles.skrValidationText}>Amount exceeds Wallet SKR balance.</Text>
               )}
               {skrUnstakeAmountTooHigh && (
-                <Text style={styles.skrValidationText}>Amount exceeds Staked SKR balance.</Text>
+                <Text style={styles.skrValidationText}>Amount exceeds requestable staked balance.</Text>
+              )}
+              {pendingUnstakeRawBig > 0n && (
+                <Text style={styles.skrValidationText}>Pending cooldown exists. Withdraw first before new unstake request.</Text>
               )}
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
               <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
-              <Text style={styles.meta}>Unstake cooldown target: 48h window (UI policy note).</Text>
+              <Text style={styles.meta}>Unstake cooldown target: 48h (chain-time based).</Text>
               <View style={styles.skrActionRow}>
                 <Pressable
                   onPress={() => {
@@ -2554,7 +2692,22 @@ export default function App() {
                     (pressed || !canSubmitSkrUnstake) && styles.skrActionBtnPressed,
                   ]}
                 >
-                  <Text style={styles.skrActionBtnText}>{skrUnstakeBusy ? 'Unstaking…' : 'Unstake SKR'}</Text>
+                  <Text style={styles.skrActionBtnText}>{skrUnstakeBusy ? 'Requesting…' : 'Request Unstake'}</Text>
+                </Pressable>
+              </View>
+              <View style={styles.skrActionRow}>
+                <Pressable
+                  onPress={() => {
+                    setSkrConfirmAction('withdraw');
+                    setShowSkrTxConfirm(true);
+                  }}
+                  disabled={!canSubmitSkrWithdraw}
+                  style={({ pressed }) => [
+                    styles.skrActionBtn,
+                    (pressed || !canSubmitSkrWithdraw) && styles.skrActionBtnPressed,
+                  ]}
+                >
+                  <Text style={styles.skrActionBtnText}>{skrWithdrawBusy ? 'Withdrawing…' : 'Withdraw SKR'}</Text>
                 </Pressable>
               </View>
               <Pressable onPress={() => setShowSkrStaking(false)} style={styles.skrCloseBtn}>
@@ -2567,31 +2720,38 @@ export default function App() {
         {showSkrTxConfirm && showSkrStaking && (
           <View style={styles.confirmOverlay}>
             <View style={styles.confirmCard}>
-              <Text style={styles.label}>Confirm {skrConfirmAction === 'stake' ? 'Stake' : 'Unstake'}</Text>
-              <Text style={styles.meta}>Amount: {skrStakeAmount || '0'} SKR</Text>
+              <Text style={styles.label}>
+                Confirm {skrConfirmAction === 'stake' ? 'Stake' : skrConfirmAction === 'unstake' ? 'Request Unstake' : 'Withdraw'}
+              </Text>
+              <Text style={styles.meta}>
+                Amount: {skrConfirmAction === 'withdraw' ? pendingUnstakeUi : (skrStakeAmount || '0')} SKR
+              </Text>
               <Text style={styles.meta}>Mint: {shortAddr(SKR_MINT)}</Text>
               <Text style={styles.meta}>Vault account: {shortAddr(skrVaultAddress)}</Text>
               <Text style={styles.meta}>
-                Estimated wallet SKR after {skrConfirmAction}: {skrConfirmAction === 'stake' ? skrBalanceAfterStake : skrBalanceAfterUnstake}
+                Estimated wallet SKR after {skrConfirmAction}: {skrConfirmAction === 'stake' ? skrBalanceAfterStake : skrConfirmAction === 'unstake' ? skrBalanceAfterUnstake : '—'}
               </Text>
               <View style={styles.row}>
                 <ActionButton label="Cancel" onPress={() => setShowSkrTxConfirm(false)} />
                 <ActionButton
-                  label={skrConfirmAction === 'stake' ? 'Confirm Stake' : 'Confirm Unstake'}
+                  label={skrConfirmAction === 'stake' ? 'Confirm Stake' : skrConfirmAction === 'unstake' ? 'Confirm Unstake Request' : 'Confirm Withdraw'}
                   onPress={async () => {
                     const action = skrConfirmAction;
                     setShowSkrTxConfirm(false);
                     if (action === 'stake') {
                       await onStakeSkr();
-                    } else {
+                    } else if (action === 'unstake') {
                       await onUnstakeSkr();
+                    } else {
+                      await onWithdrawSkr();
                     }
                   }}
                   disabled={
                     skrStakeBusy ||
                     skrUnstakeBusy ||
+                    skrWithdrawBusy ||
                     skrSubmitLock ||
-                    (skrConfirmAction === 'stake' ? !canSubmitSkrStake : !canSubmitSkrUnstake)
+                    (skrConfirmAction === 'stake' ? !canSubmitSkrStake : skrConfirmAction === 'unstake' ? !canSubmitSkrUnstake : !canSubmitSkrWithdraw)
                   }
                 />
               </View>
