@@ -932,6 +932,22 @@ export default function App() {
         trackPendingTx(prepSig, 'SKR funding transfer');
         setStatus(`Preparing SKR funding (${shortAddr(prepSig)})...`);
         await bestFundingView.conn.confirmTransaction(prepSig, 'confirmed').catch(() => null);
+        setStatus('Waiting for SKR funding to settle...');
+        const waitForAtaReady = async (conn: Connection) => {
+          for (let i = 0; i < 8; i += 1) {
+            const ataBalance = await conn.getTokenAccountBalance(ownerAta, 'confirmed').catch(() => null);
+            const ataRawNow = BigInt(String(ataBalance?.value?.amount ?? '0'));
+            if (ataRawNow >= stakeRaw) return true;
+            await new Promise<void>((resolve) => setTimeout(() => resolve(), 500));
+          }
+          return false;
+        };
+        const ataReady =
+          (await waitForAtaReady(bestFundingView.conn)) ||
+          (bestFundingView.conn === connection ? false : await waitForAtaReady(connection));
+        if (!ataReady) {
+          throw new Error('SKR funding has not settled yet. Retry stake in a moment.');
+        }
       }
 
       setStatus('Building official SKR stake transaction...');
