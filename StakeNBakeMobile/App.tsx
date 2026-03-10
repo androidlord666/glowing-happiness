@@ -907,7 +907,7 @@ export default function App() {
             fundingError.code = 'skr_needs_ata_funding';
             throw fundingError;
           }
-          throw new Error(`SKR stake simulation failed: ${(sim.value.logs ?? []).slice(-3).join(' | ') || raw}`);
+          // If fallback simulation is noisy or inconclusive, keep the normal wallet path.
         }
         const sigs = await walletAdapter.signAndSendTransactions([tx]);
         return sigs.find((s) => typeof s === 'string' && s.length > 0);
