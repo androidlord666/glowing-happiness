@@ -878,7 +878,7 @@ export default function App() {
       const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
       const ownerAta = getAssociatedTokenAddressSync(mint, owner);
       const primaryEndpoint = (connection as any).rpcEndpoint as string | undefined;
-      const candidateEndpoints = [primaryEndpoint, ...(RPC_FALLBACK_URLS[cluster] ?? [])].filter(Boolean) as string[];
+      const candidateEndpoints = Array.from(new Set([primaryEndpoint, RPC_URLS[cluster], ...(RPC_FALLBACK_URLS[cluster] ?? [])].filter(Boolean))) as string[];
       const fundingViews = await Promise.allSettled(
         candidateEndpoints.map(async (endpoint) => {
           const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
@@ -1160,7 +1160,9 @@ export default function App() {
         );
 
       if (!bestView) {
-        throw new Error('Could not read SKR token accounts right now.');
+        suppressNextStatusModalRef.current = true;
+        setStatus('SKR normalize unavailable right now. Retry in a moment.');
+        return;
       }
       const nonAtaRows = bestView.accountRows.filter((row) => !row.isAta && row.amountRaw > 0n);
       if (!nonAtaRows.length) {
