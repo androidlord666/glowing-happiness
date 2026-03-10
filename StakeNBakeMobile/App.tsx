@@ -742,7 +742,7 @@ export default function App() {
     });
   }, []);
 
-  const refreshWalletBalances = useCallback(async (walletAddr?: string) => {
+  const refreshWalletBalances = useCallback(async (walletAddr?: string, opts?: { allowDecrease?: boolean }) => {
     const active = walletAddr ?? wallet;
     if (!active) return;
     try {
@@ -798,7 +798,9 @@ export default function App() {
       })();
       const queriedValues = [confirmedRaw, primaryRaw].filter((value): value is bigint => value !== null);
       const maxQueriedRaw = queriedValues.reduce((max, value) => (value > max ? value : max), 0n);
-      const nextRaw = maxQueriedRaw > previousRaw ? maxQueriedRaw : previousRaw;
+      const nextRaw = opts?.allowDecrease
+        ? (queriedValues.length ? maxQueriedRaw : previousRaw)
+        : (maxQueriedRaw > previousRaw ? maxQueriedRaw : previousRaw);
 
       // Never downgrade to a transient zero/partial read during refresh.
       if (nextRaw > 0n || (queriedValues.length > 0 && previousRaw === 0n)) {
@@ -828,7 +830,12 @@ export default function App() {
       return;
     }
     try {
-      const data = await fetchOfficialUserStake({ walletAddress: wallet });
+      let data: Awaited<ReturnType<typeof fetchOfficialUserStake>> | null = null;
+      for (let i = 0; i < 3; i += 1) {
+        data = await fetchOfficialUserStake({ walletAddress: wallet }).catch(() => null);
+        if (data?.ok) break;
+        await new Promise<void>((resolve) => setTimeout(() => resolve(), 500));
+      }
       if (!data?.ok) {
         if (stakedSkrBalance === '—') setStakedSkrBalance('0');
         return;
@@ -1003,7 +1010,7 @@ export default function App() {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR stake submitted in wallet. Signature unavailable; refresh shortly.');
         setTimeout(() => {
-          refreshWalletBalances(wallet).catch(() => {});
+          refreshWalletBalances(wallet, { allowDecrease: true }).catch(() => {});
           refreshStakedSkrBalance().catch(() => {});
         }, 1500);
         return;
@@ -1013,7 +1020,7 @@ export default function App() {
       setStatus(`✅ Official SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
       setTimeout(() => {
-        refreshWalletBalances(wallet).catch(() => {});
+        refreshWalletBalances(wallet, { allowDecrease: true }).catch(() => {});
         refreshStakedSkrBalance().catch(() => {});
       }, 1500);
     } catch (e: any) {
@@ -1021,7 +1028,7 @@ export default function App() {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR stake submitted. Wallet returned no signature; refresh in a few seconds.');
         setTimeout(() => {
-          refreshWalletBalances(wallet).catch(() => {});
+          refreshWalletBalances(wallet, { allowDecrease: true }).catch(() => {});
           refreshStakedSkrBalance().catch(() => {});
         }, 1500);
         return;
@@ -1083,7 +1090,7 @@ export default function App() {
       if (isEmptySignatureError(e)) {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR unstake submitted. Wallet returned no signature; refresh in a few seconds.');
-        refreshWalletBalances(wallet).catch(() => {});
+        refreshWalletBalances(wallet, { allowDecrease: true }).catch(() => {});
         refreshStakedSkrBalance().catch(() => {});
         return;
       }
@@ -1123,14 +1130,14 @@ export default function App() {
       if (!sig) {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR withdraw submitted in wallet. Signature unavailable; refresh shortly.');
-        await refreshWalletBalances(wallet);
+        await refreshWalletBalances(wallet, { allowDecrease: true });
         await refreshStakedSkrBalance();
         return;
       }
       rememberTx(sig);
       trackPendingTx(sig, 'Official SKR withdraw');
       setStatus(`Official SKR withdraw submitted (${shortAddr(sig)}). Waiting confirmation...`);
-      await refreshWalletBalances(wallet);
+      await refreshWalletBalances(wallet, { allowDecrease: true });
       setSkrPendingUnstakeRaw('0');
       setSkrUnstakeUnlockAtSec(0);
       setStatus(`✅ Official SKR withdrawn (${shortAddr(sig)})`);
@@ -1139,7 +1146,7 @@ export default function App() {
       if (isEmptySignatureError(e)) {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR withdraw submitted. Wallet returned no signature; refresh in a few seconds.');
-        refreshWalletBalances(wallet).catch(() => {});
+        refreshWalletBalances(wallet, { allowDecrease: true }).catch(() => {});
         refreshStakedSkrBalance().catch(() => {});
         return;
       }
@@ -1228,7 +1235,7 @@ export default function App() {
       trackPendingTx(sig, 'Normalize SKR accounts');
       setStatus(`Normalizing SKR accounts (${shortAddr(sig)})...`);
       await bestView.conn.confirmTransaction(sig, 'confirmed').catch(() => null);
-      await refreshWalletBalances(wallet);
+      await refreshWalletBalances(wallet, { allowDecrease: true });
       await refreshSkrAccountShape(wallet);
       suppressNextStatusModalRef.current = true;
       setStatus('SKR accounts normalized.');
@@ -1236,7 +1243,7 @@ export default function App() {
       if (isEmptySignatureError(e)) {
         suppressNextStatusModalRef.current = true;
         setStatus('SKR normalize submitted. Wallet returned no signature; refresh in a few seconds.');
-        refreshWalletBalances(wallet).catch(() => {});
+        refreshWalletBalances(wallet, { allowDecrease: true }).catch(() => {});
         return;
       }
       if (classifyError(e) === 'rpc') {
@@ -2874,7 +2881,7 @@ export default function App() {
                     if (skrRefreshBusy || !wallet) return;
                     setSkrRefreshBusy(true);
                     try {
-                      await refreshWalletBalances(wallet);
+                      await refreshWalletBalances(wallet, { allowDecrease: true });
                       await refreshStakedSkrBalance();
                       await refreshSkrAccountShape(wallet);
                       const apy = await fetchOfficialCurrentApy().catch(() => null);
