@@ -874,6 +874,15 @@ export default function App() {
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
       const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
+      const skrRpc = new Connection(RPC_FALLBACK_URLS[cluster]?.[0] ?? RPC_URLS[cluster], 'confirmed');
+      const isFundingFailure = (raw: string, logs?: string[]) => {
+        const joined = `${raw}\n${(logs ?? []).join('\n')}`.toLowerCase();
+        return (
+          joined.includes('insufficient funds') ||
+          joined.includes('tokenkeg') ||
+          joined.includes('custom program error: 0x1')
+        );
+      };
       const submitOfficialStake = async () => {
         setStatus('Building official SKR stake transaction...');
         const built = await buildOfficialStakeTx({
@@ -882,12 +891,29 @@ export default function App() {
           user: wallet,
         });
         const tx = decodeOfficialUnsignedTx(built.transaction);
+        const sim = await withTimeout(
+          skrRpc.simulateTransaction(tx as VersionedTransaction, {
+            replaceRecentBlockhash: true,
+            sigVerify: false,
+            commitment: 'confirmed',
+          }),
+          7000,
+          'skr stake simulation'
+        ).catch(() => null);
+        if (sim?.value?.err) {
+          const raw = JSON.stringify(sim.value.err);
+          if (isFundingFailure(raw, sim.value.logs ?? [])) {
+            const fundingError: any = new Error('SKR stake needs ATA funding');
+            fundingError.code = 'skr_needs_ata_funding';
+            throw fundingError;
+          }
+          throw new Error(`SKR stake simulation failed: ${(sim.value.logs ?? []).slice(-3).join(' | ') || raw}`);
+        }
         const sigs = await walletAdapter.signAndSendTransactions([tx]);
         return sigs.find((s) => typeof s === 'string' && s.length > 0);
       };
       const fundAtaIfNeeded = async () => {
         setStatus('Checking SKR funding...');
-        const skrRpc = new Connection(RPC_FALLBACK_URLS[cluster]?.[0] ?? RPC_URLS[cluster], 'confirmed');
         const ownerAta = getAssociatedTokenAddressSync(mint, owner);
         const mintAccounts = await skrRpc.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
         const accountRows = mintAccounts.value.map((row) => {
@@ -944,7 +970,7 @@ export default function App() {
         sig = await submitOfficialStake();
       } catch (e: any) {
         const raw = String(e?.message ?? e ?? '').toLowerCase();
-        if (!(raw.includes('insufficient funds') || raw.includes('tokenkeg'))) {
+        if (!(e?.code === 'skr_needs_ata_funding' || raw.includes('insufficient funds') || raw.includes('tokenkeg'))) {
           throw e;
         }
         const funded = await fundAtaIfNeeded();
