@@ -875,28 +875,47 @@ export default function App() {
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
       const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
-      const skrRpc = new Connection(RPC_FALLBACK_URLS[cluster]?.[0] ?? RPC_URLS[cluster], 'confirmed');
       const ownerAta = getAssociatedTokenAddressSync(mint, owner);
       setStatus('Checking SKR funding...');
-      const mintAccounts = await skrRpc.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
-      const accountRows = mintAccounts.value.map((row) => {
-        const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
-        return {
-          pubkey: row.pubkey,
-          amountRaw,
-          isAta: row.pubkey.toBase58() === ownerAta.toBase58(),
-        };
-      });
-      const ataRaw = accountRows.find((row) => row.isAta)?.amountRaw ?? 0n;
-      const totalRaw = accountRows.reduce((sum, row) => sum + row.amountRaw, 0n);
-      if (totalRaw < stakeRaw) {
-        throw new Error(`Stake amount exceeds wallet balance (${formatRawAmount(totalRaw.toString(), decimals, 6)} SKR).`);
-      }
-      const neededForAta = stakeRaw > ataRaw ? stakeRaw - ataRaw : 0n;
-      if (neededForAta > 0n) {
+      const primaryEndpoint = (connection as any).rpcEndpoint as string | undefined;
+      const candidateEndpoints = [primaryEndpoint, ...(RPC_FALLBACK_URLS[cluster] ?? [])].filter(Boolean) as string[];
+      const accountResults = await Promise.allSettled(
+        candidateEndpoints.map(async (endpoint) => {
+          const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
+          const mintAccounts = await conn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+          const accountRows = mintAccounts.value.map((row) => {
+            const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
+            return {
+              pubkey: row.pubkey,
+              amountRaw,
+              isAta: row.pubkey.toBase58() === ownerAta.toBase58(),
+              conn,
+            };
+          });
+          const ataRaw = accountRows.find((row) => row.isAta)?.amountRaw ?? 0n;
+          const totalRaw = accountRows.reduce((sum, row) => sum + row.amountRaw, 0n);
+          return { conn, accountRows, ataRaw, totalRaw };
+        })
+      );
+      const successfulAccountReads = accountResults
+        .filter((result): result is PromiseFulfilledResult<{ conn: Connection; accountRows: Array<{ pubkey: any; amountRaw: bigint; isAta: boolean; conn: Connection }>; ataRaw: bigint; totalRaw: bigint }> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      const bestFundingView = successfulAccountReads.reduce<{ conn: Connection; accountRows: Array<{ pubkey: any; amountRaw: bigint; isAta: boolean; conn: Connection }>; ataRaw: bigint; totalRaw: bigint } | null>(
+        (best, current) => (!best || current.totalRaw > best.totalRaw ? current : best),
+        null
+      );
+      if (!bestFundingView) {
+        setStatus('Building official SKR stake transaction...');
+      } else {
+        const { conn: fundingConn, accountRows, ataRaw, totalRaw } = bestFundingView;
+        if (totalRaw < stakeRaw) {
+          throw new Error(`Stake amount exceeds wallet balance (${formatRawAmount(totalRaw.toString(), decimals, 6)} SKR).`);
+        }
+        const neededForAta = stakeRaw > ataRaw ? stakeRaw - ataRaw : 0n;
+        if (neededForAta > 0n) {
         setStatus('Preparing SKR funding account...');
         const prepTx = new Transaction();
-        const recent = await skrRpc.getLatestBlockhash('confirmed');
+        const recent = await fundingConn.getLatestBlockhash('confirmed');
         prepTx.recentBlockhash = recent.blockhash;
         prepTx.lastValidBlockHeight = recent.lastValidBlockHeight;
         prepTx.feePayer = owner;
@@ -921,7 +940,8 @@ export default function App() {
         rememberTx(prepSig);
         trackPendingTx(prepSig, 'SKR funding transfer');
         setStatus(`Preparing SKR funding (${shortAddr(prepSig)})...`);
-        await skrRpc.confirmTransaction(prepSig, 'confirmed').catch(() => null);
+        await fundingConn.confirmTransaction(prepSig, 'confirmed').catch(() => null);
+        }
       }
 
       setStatus('Building official SKR stake transaction...');
