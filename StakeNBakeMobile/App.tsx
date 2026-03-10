@@ -415,6 +415,7 @@ export default function App() {
   const [showFeePolicy, setShowFeePolicy] = useState(false);
   const [showWhatsNew, setShowWhatsNew] = useState(false);
   const [showTips, setShowTips] = useState(false);
+  const [showLegalDoc, setShowLegalDoc] = useState<null | 'privacy' | 'terms'>(null);
   const [showStatusModal, setShowStatusModal] = useState(false);
   const [skrErrorDetail, setSkrErrorDetail] = useState('');
   const suppressNextStatusModalRef = useRef(false);
@@ -2626,6 +2627,8 @@ export default function App() {
             />
             <ActionButton label="Quick Tips" onPress={() => setShowTips(true)} />
             <ActionButton label="View Fee Policy" onPress={() => setShowFeePolicy(true)} />
+            <ActionButton label="Privacy Policy" onPress={() => setShowLegalDoc('privacy')} />
+            <ActionButton label="Terms & Conditions" onPress={() => setShowLegalDoc('terms')} />
             <ActionButton label="Copy Fee Wallet" onPress={copyFeeWallet} />
             <ActionButton label="Copy Debug Report" onPress={copyDebugReport} />
             <ActionButton label="Copy TX Lifecycle Report" onPress={copyTxLifecycleReport} />
@@ -2800,6 +2803,75 @@ export default function App() {
                   }
                 />
               </View>
+            </View>
+          </View>
+        )}
+
+        {!!showLegalDoc && (
+          <View style={styles.confirmOverlay}>
+            <View style={[styles.confirmCard, styles.legalCard]}>
+              <Text style={styles.label}>
+                {showLegalDoc === 'privacy' ? 'Privacy Policy' : 'Terms & Conditions'}
+              </Text>
+              <ScrollView style={styles.legalScroll} contentContainerStyle={styles.legalScrollContent} showsVerticalScrollIndicator={false}>
+                {showLegalDoc === 'privacy' ? (
+                  <>
+                    <Text style={styles.meta}>Effective date: March 10, 2026</Text>
+                    <Text style={styles.meta}>Staking with Solana Mobile is a wallet-connected staking utility for Solana users. The app is designed to help users manage SOL and SKR staking actions from a mobile device.</Text>
+                    <Text style={styles.meta}>Information collected:</Text>
+                    <Text style={styles.meta}>- Public wallet addresses you connect to the app</Text>
+                    <Text style={styles.meta}>- Public blockchain state needed to display balances, stake accounts, transaction history, cooldowns, and staking status</Text>
+                    <Text style={styles.meta}>- Local app preferences such as theme, selected explorer, and cached interface data stored on-device</Text>
+                    <Text style={styles.meta}>What the app does not collect:</Text>
+                    <Text style={styles.meta}>- Seed phrases or private keys</Text>
+                    <Text style={styles.meta}>- Passwords or sensitive wallet secrets</Text>
+                    <Text style={styles.meta}>- Traditional personal profile data unless you voluntarily include it in a support request</Text>
+                    <Text style={styles.meta}>How data is used:</Text>
+                    <Text style={styles.meta}>- To load public on-chain balances and staking state</Text>
+                    <Text style={styles.meta}>- To build and submit wallet-approved transactions</Text>
+                    <Text style={styles.meta}>- To improve reliability, support debugging, and respond to support requests when you choose to share logs or support bundles</Text>
+                    <Text style={styles.meta}>Third-party services:</Text>
+                    <Text style={styles.meta}>- Solana RPC providers may process public blockchain queries required by the app</Text>
+                    <Text style={styles.meta}>- Wallet providers process transaction signing requests that you approve</Text>
+                    <Text style={styles.meta}>- Explorer links may open third-party sites when you choose to inspect transactions</Text>
+                    <Text style={styles.meta}>Data storage:</Text>
+                    <Text style={styles.meta}>- Cached app data and preferences are stored locally on your device</Text>
+                    <Text style={styles.meta}>- Public blockchain activity remains visible on-chain by design</Text>
+                    <Text style={styles.meta}>Your choices:</Text>
+                    <Text style={styles.meta}>- You can disconnect your wallet at any time</Text>
+                    <Text style={styles.meta}>- You can avoid sharing debug/support bundles if you do not want to send app diagnostics</Text>
+                    <Text style={styles.meta}>Contact:</Text>
+                    <Text style={styles.meta}>For privacy questions or support, contact the publisher through the support details provided in the Solana dApp Store submission.</Text>
+                  </>
+                ) : (
+                  <>
+                    <Text style={styles.meta}>Effective date: March 10, 2026</Text>
+                    <Text style={styles.meta}>These Terms & Conditions govern use of Staking with Solana Mobile.</Text>
+                    <Text style={styles.meta}>Use of the app:</Text>
+                    <Text style={styles.meta}>- You must review and approve every wallet transaction yourself</Text>
+                    <Text style={styles.meta}>- You are responsible for verifying transaction details, amounts, validator destinations, and wallet balances before signing</Text>
+                    <Text style={styles.meta}>- Blockchain transactions are final once confirmed on-chain</Text>
+                    <Text style={styles.meta}>No custody:</Text>
+                    <Text style={styles.meta}>- The app does not custody user funds</Text>
+                    <Text style={styles.meta}>- Private keys and signing authority remain with your connected wallet provider</Text>
+                    <Text style={styles.meta}>Network and third-party dependencies:</Text>
+                    <Text style={styles.meta}>- App functionality depends on Solana network conditions, wallet availability, RPC providers, and third-party infrastructure</Text>
+                    <Text style={styles.meta}>- Delays, failed simulations, stale reads, or rejected transactions may occur because of external conditions outside the app operator’s control</Text>
+                    <Text style={styles.meta}>Fees and rewards:</Text>
+                    <Text style={styles.meta}>- Network fees, validator behavior, staking rewards, cooldowns, and other protocol-level outcomes are determined by Solana and the relevant staking program</Text>
+                    <Text style={styles.meta}>- Any displayed APY or reward information is informational and may change</Text>
+                    <Text style={styles.meta}>No financial advice:</Text>
+                    <Text style={styles.meta}>- The app is a software tool and does not provide financial, investment, tax, or legal advice</Text>
+                    <Text style={styles.meta}>Limitation of liability:</Text>
+                    <Text style={styles.meta}>- To the maximum extent permitted by law, the app publisher is not liable for losses arising from market conditions, validator behavior, wallet issues, RPC failures, user error, or blockchain network events</Text>
+                    <Text style={styles.meta}>Changes:</Text>
+                    <Text style={styles.meta}>- These terms may be updated in future releases. Continued use of the app after an update constitutes acceptance of the revised terms.</Text>
+                    <Text style={styles.meta}>Contact:</Text>
+                    <Text style={styles.meta}>For questions about these terms, use the support contact provided in the Solana dApp Store listing.</Text>
+                  </>
+                )}
+              </ScrollView>
+              <ActionButton label="Close" onPress={() => setShowLegalDoc(null)} />
             </View>
           </View>
         )}
@@ -3226,6 +3298,17 @@ const styles = StyleSheet.create({
     fontSize: 11,
     textAlign: 'center',
     marginTop: 6,
+  },
+  legalCard: {
+    maxHeight: '82%',
+  },
+  legalScroll: {
+    maxHeight: 420,
+    marginVertical: 8,
+  },
+  legalScrollContent: {
+    gap: 8,
+    paddingBottom: 4,
   },
   dropdownBox: {
     borderWidth: 1,
