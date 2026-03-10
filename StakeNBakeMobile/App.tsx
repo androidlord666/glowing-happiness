@@ -873,27 +873,41 @@ export default function App() {
 
       setSkrStakeBusy(true);
       setSkrErrorDetail('');
-      setStatus('Checking SKR funding...');
-      const skrRpc = new Connection(RPC_FALLBACK_URLS[cluster]?.[0] ?? RPC_URLS[cluster], 'confirmed');
+      const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
+      const submitOfficialStake = async () => {
+        setStatus('Building official SKR stake transaction...');
+        const built = await buildOfficialStakeTx({
+          naturalTokenAmount: amountText,
+          payer: wallet,
+          user: wallet,
+        });
+        const tx = decodeOfficialUnsignedTx(built.transaction);
+        const sigs = await walletAdapter.signAndSendTransactions([tx]);
+        return sigs.find((s) => typeof s === 'string' && s.length > 0);
+      };
+      const fundAtaIfNeeded = async () => {
+        setStatus('Checking SKR funding...');
+        const skrRpc = new Connection(RPC_FALLBACK_URLS[cluster]?.[0] ?? RPC_URLS[cluster], 'confirmed');
+        const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+        const mintAccounts = await skrRpc.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+        const accountRows = mintAccounts.value.map((row) => {
+          const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
+          return {
+            pubkey: row.pubkey,
+            amountRaw,
+            isAta: row.pubkey.toBase58() === ownerAta.toBase58(),
+          };
+        });
+        const ataRaw = accountRows.find((row) => row.isAta)?.amountRaw ?? 0n;
+        const totalRaw = accountRows.reduce((sum, row) => sum + row.amountRaw, 0n);
+        if (totalRaw < stakeRaw) {
+          throw new Error(`Stake amount exceeds wallet balance (${formatRawAmount(totalRaw.toString(), decimals, 6)} SKR).`);
+        }
+        const neededForAta = stakeRaw > ataRaw ? stakeRaw - ataRaw : 0n;
+        if (neededForAta <= 0n) {
+          return false;
+        }
 
-      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
-      const mintAccounts = await skrRpc.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
-      const accountRows = mintAccounts.value.map((row) => {
-        const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
-        return {
-          pubkey: row.pubkey,
-          amountRaw,
-          isAta: row.pubkey.toBase58() === ownerAta.toBase58(),
-        };
-      });
-      const ataRaw = accountRows.find((row) => row.isAta)?.amountRaw ?? 0n;
-      const totalRaw = accountRows.reduce((sum, row) => sum + row.amountRaw, 0n);
-      if (totalRaw < stakeRaw) {
-        throw new Error(`Stake amount exceeds wallet balance (${formatRawAmount(totalRaw.toString(), decimals, 6)} SKR).`);
-      }
-
-      const neededForAta = stakeRaw > ataRaw ? stakeRaw - ataRaw : 0n;
-      if (neededForAta > 0n) {
         setStatus('Preparing SKR funding account...');
         const prepTx = new Transaction();
         const recent = await skrRpc.getLatestBlockhash('confirmed');
@@ -922,19 +936,22 @@ export default function App() {
         trackPendingTx(prepSig, 'SKR funding transfer');
         setStatus(`Preparing SKR funding (${shortAddr(prepSig)})...`);
         await skrRpc.confirmTransaction(prepSig, 'confirmed').catch(() => null);
+        return true;
+      };
+
+      let sig: string | undefined;
+      try {
+        sig = await submitOfficialStake();
+      } catch (e: any) {
+        const raw = String(e?.message ?? e ?? '').toLowerCase();
+        if (!(raw.includes('insufficient funds') || raw.includes('tokenkeg'))) {
+          throw e;
+        }
+        const funded = await fundAtaIfNeeded();
+        if (!funded) throw e;
+        sig = await submitOfficialStake();
       }
 
-      setStatus('Building official SKR stake transaction...');
-
-      const amountText = String(skrStakeAmount).replace(/[,\s_]/g, '').trim();
-      const built = await buildOfficialStakeTx({
-        naturalTokenAmount: amountText,
-        payer: wallet,
-        user: wallet,
-      });
-      const tx = decodeOfficialUnsignedTx(built.transaction);
-      const sigs = await walletAdapter.signAndSendTransactions([tx]);
-      const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
       if (!sig) {
         suppressNextStatusModalRef.current = true;
         setStatus('Official SKR stake submitted in wallet. Signature unavailable; refresh shortly.');
@@ -946,18 +963,6 @@ export default function App() {
       }
       rememberTx(sig);
       trackPendingTx(sig, 'Official SKR stake');
-      try {
-        const currentWalletRaw = BigInt(uiAmountToRaw(walletSkrBalance, decimals));
-        const nextWalletRaw = currentWalletRaw > stakeRaw ? currentWalletRaw - stakeRaw : 0n;
-        setWalletSkrBalance(formatRawAmount(nextWalletRaw.toString(), decimals, 6));
-      } catch {
-        // keep last-known wallet balance if optimistic update fails
-      }
-      if (Number.isFinite(parsedStakedSkrBalance)) {
-        setStakedSkrBalance((parsedStakedSkrBalance + amount).toFixed(6));
-      } else {
-        setStakedSkrBalance(amount.toFixed(6));
-      }
       setStatus(`✅ Official SKR staked (${shortAddr(sig)})`);
       loadStakeAccounts(wallet, { skipBalances: true, skipBusy: true }).catch(() => {});
       setTimeout(() => {
