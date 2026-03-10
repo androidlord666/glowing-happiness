@@ -1,6 +1,6 @@
 import { Buffer } from 'buffer';
 import { PublicKey, Transaction, VersionedTransaction } from '@solana/web3.js';
-import { ClusterName } from '../config';
+import { APP_NAME, ClusterName } from '../config';
 
 export type WalletSession = {
   address: string;
@@ -51,7 +51,7 @@ export class SolanaMobileWalletAdapter implements WalletAdapter {
   private address: string | null = null;
   private authToken: string | null = null;
   private readonly appIdentity = {
-    name: 'Staking with Solana Mobile',
+    name: APP_NAME,
     uri: 'https://github.com/androidlord666/glowing-happiness',
     icon: 'favicon.ico',
   };

@@ -11,7 +11,6 @@ import {
   Pressable,
   Animated,
   Easing,
-  Image,
   FlatList,
   AppState,
   RefreshControl,
@@ -57,9 +56,6 @@ import {
 } from './src/lib/consolidation';
 
 const walletAdapter = createWalletAdapter();
-const solanaMobileWhiteLogo = require('./src/assets/solana-mobile-white.png');
-const solanaMobileBlackLogo = require('./src/assets/solana-mobile-black.png');
-const seekerButtonImage = require('./src/assets/seeker-button.png');
 
 type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
@@ -79,7 +75,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.51 (code 63)';
+const APP_VERSION_LABEL = 'v2.51 (code 65)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -97,10 +93,10 @@ const PLATFORM_FEE_CAP_SKR = 100;
 // Keep batch requests small for high reliability; 99-source runs are still supported via chunking.
 const DEFAULT_BATCH_TX_PER_REQUEST: ConsolidationBatchChunkSize = 3;
 const CONSOLIDATION_IDEMPOTENCY_WINDOW_MS = 2 * 60 * 1000;
-const TX_LIFECYCLE_STORAGE_KEY = '@staking_with_solana_mobile:txLifecycleEvents:v1';
-const STAKE_SNAPSHOT_CACHE_PREFIX = '@staking_with_solana_mobile:stakeSnapshot:v1';
+const TX_LIFECYCLE_STORAGE_KEY = '@mobile_staking_toolkit:txLifecycleEvents:v1';
+const STAKE_SNAPSHOT_CACHE_PREFIX = '@mobile_staking_toolkit:stakeSnapshot:v1';
 const SKR_UNSTAKE_COOLDOWN_SECS = 48 * 60 * 60;
-const SKR_COOLDOWN_CACHE_PREFIX = '@staking_with_solana_mobile:skrCooldown:v1';
+const SKR_COOLDOWN_CACHE_PREFIX = '@mobile_staking_toolkit:skrCooldown:v1';
 
 function getStakeSnapshotCacheKey(cluster: ClusterName, wallet: string): string {
   return `${STAKE_SNAPSHOT_CACHE_PREFIX}:${cluster}:${wallet}`;
@@ -1402,7 +1398,7 @@ export default function App() {
       setSkrExtraAccountCount(0);
       return;
     }
-    setSkrVaultAddress('stake.solanamobile.com');
+    setSkrVaultAddress('Official SKR stake source');
     refreshWalletBalances(wallet).catch(() => {});
     refreshStakedSkrBalance().catch(() => {});
     refreshSkrAccountShape(wallet).catch(() => {});
@@ -2292,7 +2288,7 @@ export default function App() {
       : null;
 
     const report = {
-      app: 'Staking with Solana Mobile',
+      app: APP_NAME,
       version: APP_VERSION_LABEL,
       cluster,
       explorer,
@@ -2318,7 +2314,7 @@ export default function App() {
 
   const copySupportBundle = () => {
     const payload = {
-      app: 'Staking with Solana Mobile',
+      app: APP_NAME,
       version: APP_VERSION_LABEL,
       features: {
         feeEnabled: FEATURE_FEE_ENABLED,
@@ -2347,7 +2343,7 @@ export default function App() {
 
   const copyTxLifecycleReport = () => {
     const payload = {
-      app: 'Staking with Solana Mobile',
+      app: APP_NAME,
       version: APP_VERSION_LABEL,
       timestamp: new Date().toISOString(),
       events: txLifecycleEvents,
@@ -2359,7 +2355,7 @@ export default function App() {
   const exportLogsToShare = async () => {
     try {
       const payload = {
-        app: 'Staking with Solana Mobile',
+        app: APP_NAME,
         version: APP_VERSION_LABEL,
         cluster,
         explorer,
@@ -2403,16 +2399,15 @@ export default function App() {
   };
 
   if (screen === 'splash') {
-    const whitePhase = splashPhase === 0;
     return (
       <SafeAreaProvider>
-        <SafeAreaView style={[styles.root, styles.centered, whitePhase ? styles.splashRootLight : styles.splashRootDark]}>
-          <StatusBar barStyle={whitePhase ? 'dark-content' : 'light-content'} />
-          <Image
-            source={whitePhase ? solanaMobileBlackLogo : solanaMobileWhiteLogo}
-            style={styles.splashLogo}
-            resizeMode="contain"
-          />
+        <SafeAreaView style={[styles.root, styles.centered, splashPhase === 0 ? styles.splashRootLight : styles.splashRootDark]}>
+          <StatusBar barStyle={splashPhase === 0 ? 'dark-content' : 'light-content'} />
+          <View style={styles.splashWordmarkBox}>
+            <Text style={[styles.splashWordmark, splashPhase === 0 && styles.splashWordmarkLight]}>
+              {splashPhase === 0 ? 'MST' : APP_NAME}
+            </Text>
+          </View>
         </SafeAreaView>
       </SafeAreaProvider>
     );
@@ -2424,7 +2419,9 @@ export default function App() {
         <SafeAreaView style={[styles.root, styles.centered, styles.landingRootDark]}>
           <StatusBar barStyle={'light-content'} />
           <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
-            <Image source={solanaMobileWhiteLogo} style={styles.splashLogo} resizeMode="contain" />
+            <View style={styles.splashWordmarkBox}>
+              <Text style={styles.splashWordmark}>{APP_NAME}</Text>
+            </View>
             <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
             <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
             <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
@@ -2455,7 +2452,7 @@ export default function App() {
         }
       >
         <View style={styles.headerCenter}>
-          <Image source={theme === 'light' ? solanaMobileBlackLogo : solanaMobileWhiteLogo} style={styles.headerLogo} resizeMode="contain" />
+          <Text style={[styles.headerWordmark, theme === 'light' && styles.headerWordmarkLight]}>{APP_NAME}</Text>
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Mainnet</Text>
         <Text style={[styles.rpcBadge, rpcHealth === 'degraded' && styles.rpcBadgeBad]}>
@@ -2496,9 +2493,9 @@ export default function App() {
 
         {mode === 'stake' && (
           <Animated.View style={[styles.card, theme === 'light' && styles.stakeCardLight, { opacity: modeFade, transform: [{ translateY: modeFade.interpolate({ inputRange: [0.92, 1], outputRange: [4, 0] }) }] }]}>
-            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Solana Mobile Staking</Text>
+            <Text style={[styles.label, theme === 'light' && styles.labelLight]}>Mobile Staking</Text>
             <View style={[styles.validatorBox, theme === 'dark' && styles.validatorBoxDarkHighlight]}>
-              <Text style={[styles.validatorTitle, theme === 'dark' && styles.validatorTitleDarkHighlight]}>Solana Mobile Validator</Text>
+              <Text style={[styles.validatorTitle, theme === 'dark' && styles.validatorTitleDarkHighlight]}>Default Validator</Text>
               <Text style={styles.validatorAddr}>{validatorVote}</Text>
             </View>
 
@@ -2816,7 +2813,7 @@ export default function App() {
             }}
             style={styles.seekerBtnTopRight}
           >
-            <Image source={seekerButtonImage} style={styles.seekerBtnImage} resizeMode="contain" />
+            <Text style={styles.skrLaunchBtnText}>SKR</Text>
           </Pressable>
         </View>
 
@@ -2861,7 +2858,7 @@ export default function App() {
             <ActionButton label="Copy Support Bundle" onPress={copySupportBundle} />
             <ActionButton label="Report Issue Template" onPress={copyIssueTemplate} />
           </ScrollView>
-          <Text style={styles.settingsFooter}>built with ❤️ for Solana Mobile</Text>
+          <Text style={styles.settingsFooter}>independent wallet staking utility</Text>
 
         </View>
       )}
@@ -3052,7 +3049,7 @@ export default function App() {
                 {showLegalDoc === 'privacy' ? (
                   <>
                     <Text style={styles.meta}>Effective date: March 10, 2026</Text>
-                    <Text style={styles.meta}>Staking with Solana Mobile is a wallet-connected staking utility for Solana users. The app is designed to help users manage SOL and SKR staking actions from a mobile device.</Text>
+                    <Text style={styles.meta}>{APP_NAME} is a wallet-connected staking utility for Solana users. The app is designed to help users manage SOL and SKR staking actions from a mobile device.</Text>
                     <Text style={styles.meta}>Information collected:</Text>
                     <Text style={styles.meta}>- Public wallet addresses you connect to the app</Text>
                     <Text style={styles.meta}>- Public blockchain state needed to display balances, stake accounts, transaction history, cooldowns, and staking status</Text>
@@ -3081,7 +3078,7 @@ export default function App() {
                 ) : (
                   <>
                     <Text style={styles.meta}>Effective date: March 10, 2026</Text>
-                    <Text style={styles.meta}>These Terms & Conditions govern use of Staking with Solana Mobile.</Text>
+                    <Text style={styles.meta}>These Terms & Conditions govern use of {APP_NAME}.</Text>
                     <Text style={styles.meta}>Use of the app:</Text>
                     <Text style={styles.meta}>- You must review and approve every wallet transaction yourself</Text>
                     <Text style={styles.meta}>- You are responsible for verifying transaction details, amounts, validator destinations, and wallet balances before signing</Text>
@@ -3239,6 +3236,28 @@ const styles = StyleSheet.create({
     borderColor: '#FF9B9B',
   },
   splashLogo: { width: 320, height: 90 },
+  splashWordmarkBox: {
+    minWidth: 240,
+    minHeight: 88,
+    paddingHorizontal: 22,
+    paddingVertical: 18,
+    borderRadius: 20,
+    borderWidth: 1,
+    borderColor: '#1E4D56',
+    backgroundColor: '#0B1D23',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  splashWordmark: {
+    color: '#EAFDFF',
+    fontSize: 28,
+    fontWeight: '800',
+    letterSpacing: 0.6,
+    textAlign: 'center',
+  },
+  splashWordmarkLight: {
+    color: '#0A242A',
+  },
   splashRootLight: { backgroundColor: '#fff' },
   splashRootDark: { backgroundColor: '#000' },
   landingRootDark: { backgroundColor: '#000' },
@@ -3339,6 +3358,16 @@ const styles = StyleSheet.create({
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 4 },
   headerLogo: { width: 240, height: 40 },
+  headerWordmark: {
+    color: '#EAFDFF',
+    fontSize: 24,
+    fontWeight: '800',
+    letterSpacing: 0.3,
+    textAlign: 'center',
+  },
+  headerWordmarkLight: {
+    color: '#072225',
+  },
   topRightButtons: {
     position: 'absolute',
     right: 14,
@@ -3368,6 +3397,12 @@ const styles = StyleSheet.create({
   seekerBtnImage: {
     width: 34,
     height: 34,
+  },
+  skrLaunchBtnText: {
+    color: '#8AF1EF',
+    fontWeight: '800',
+    fontSize: 13,
+    letterSpacing: 0.4,
   },
   gearIcon: { fontSize: 18 },
   skrStakeCard: {
