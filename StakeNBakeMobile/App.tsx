@@ -397,6 +397,7 @@ export default function App() {
   const [skrStakeBusy, setSkrStakeBusy] = useState(false);
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
   const [skrWithdrawBusy, setSkrWithdrawBusy] = useState(false);
+  const [skrNormalizeBusy, setSkrNormalizeBusy] = useState(false);
   const [skrRefreshBusy, setSkrRefreshBusy] = useState(false);
   const [skrApyPct, setSkrApyPct] = useState<string>('—');
   const [skrSubmitLock, setSkrSubmitLock] = useState(false);
@@ -1114,6 +1115,99 @@ export default function App() {
       setStatus(actionError('SKR withdraw error', e));
     } finally {
       setSkrWithdrawBusy(false);
+      setSkrSubmitLock(false);
+    }
+  };
+
+  const onNormalizeSkrAccounts = async () => {
+    if (skrNormalizeBusy || skrSubmitLock) return;
+    setSkrSubmitLock(true);
+    try {
+      if (!wallet) throw new Error('Wallet not connected');
+      const owner = asPublicKey(wallet);
+      const mint = asPublicKey(SKR_MINT);
+      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+      setSkrNormalizeBusy(true);
+      setSkrErrorDetail('');
+      setStatus('Normalizing SKR token accounts...');
+
+      const primaryEndpoint = (connection as any).rpcEndpoint as string | undefined;
+      const candidateEndpoints = [primaryEndpoint, ...(RPC_FALLBACK_URLS[cluster] ?? [])].filter(Boolean) as string[];
+      const accountResults = await Promise.allSettled(
+        candidateEndpoints.map(async (endpoint) => {
+          const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
+          const mintAccounts = await conn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+          const accountRows = mintAccounts.value.map((row) => ({
+            pubkey: row.pubkey,
+            amountRaw: BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0')),
+            isAta: row.pubkey.toBase58() === ownerAta.toBase58(),
+            conn,
+          }));
+          return {
+            conn,
+            accountRows,
+            ataRaw: accountRows.find((row) => row.isAta)?.amountRaw ?? 0n,
+            totalRaw: accountRows.reduce((sum, row) => sum + row.amountRaw, 0n),
+          };
+        })
+      );
+      const bestView = accountResults
+        .filter((result): result is PromiseFulfilledResult<{ conn: Connection; accountRows: Array<{ pubkey: any; amountRaw: bigint; isAta: boolean; conn: Connection }>; ataRaw: bigint; totalRaw: bigint }> => result.status === 'fulfilled')
+        .map((result) => result.value)
+        .reduce<{ conn: Connection; accountRows: Array<{ pubkey: any; amountRaw: bigint; isAta: boolean; conn: Connection }>; ataRaw: bigint; totalRaw: bigint } | null>(
+          (best, current) => (!best || current.totalRaw > best.totalRaw ? current : best),
+          null
+        );
+
+      if (!bestView) {
+        throw new Error('Could not read SKR token accounts right now.');
+      }
+      const nonAtaRows = bestView.accountRows.filter((row) => !row.isAta && row.amountRaw > 0n);
+      if (!nonAtaRows.length) {
+        suppressNextStatusModalRef.current = true;
+        setStatus('SKR already normalized. No extra token accounts found.');
+        return;
+      }
+
+      const tx = new Transaction();
+      const recent = await bestView.conn.getLatestBlockhash('confirmed');
+      tx.recentBlockhash = recent.blockhash;
+      tx.lastValidBlockHeight = recent.lastValidBlockHeight;
+      tx.feePayer = owner;
+      tx.add(createAssociatedTokenAccountIdempotentInstruction(owner, ownerAta, owner, mint));
+      for (const row of nonAtaRows) {
+        tx.add(createTransferInstruction(row.pubkey, ownerAta, owner, row.amountRaw));
+      }
+
+      const sigs = await walletAdapter.signAndSendTransactions([tx]);
+      const sig = sigs.find((s) => typeof s === 'string' && s.length > 0);
+      if (!sig) {
+        throw new Error('Normalize transaction submitted without signature. Refresh and retry.');
+      }
+      rememberTx(sig);
+      trackPendingTx(sig, 'Normalize SKR accounts');
+      setStatus(`Normalizing SKR accounts (${shortAddr(sig)})...`);
+      await bestView.conn.confirmTransaction(sig, 'confirmed').catch(() => null);
+      await refreshWalletBalances(wallet);
+      suppressNextStatusModalRef.current = true;
+      setStatus('SKR accounts normalized.');
+    } catch (e: any) {
+      if (isEmptySignatureError(e)) {
+        suppressNextStatusModalRef.current = true;
+        setStatus('SKR normalize submitted. Wallet returned no signature; refresh in a few seconds.');
+        refreshWalletBalances(wallet).catch(() => {});
+        return;
+      }
+      if (classifyError(e) === 'rpc') {
+        suppressNextStatusModalRef.current = true;
+        setSkrErrorDetail('');
+        setStatus('SKR normalize hit RPC rate limits. Retry now.');
+        return;
+      }
+      setSkrErrorDetail(String(e?.message ?? e ?? 'unknown'));
+      setStatus(actionError('SKR normalize error', e));
+    } finally {
+      setSkrNormalizeBusy(false);
       setSkrSubmitLock(false);
     }
   };
@@ -2789,6 +2883,13 @@ export default function App() {
                   style={({ pressed }) => [styles.skrQuickBtn, (pressed || !Number.isFinite(parsedSkrBalance)) && styles.skrQuickBtnPressed]}
                 >
                   <Text style={styles.skrQuickBtnText}>Max</Text>
+                </Pressable>
+                <Pressable
+                  onPress={onNormalizeSkrAccounts}
+                  disabled={skrSubmitLock || skrNormalizeBusy}
+                  style={({ pressed }) => [styles.skrQuickBtn, (pressed || skrSubmitLock || skrNormalizeBusy) && styles.skrQuickBtnPressed]}
+                >
+                  <Text style={styles.skrQuickBtnText}>{skrNormalizeBusy ? 'Normalizing…' : 'Normalize SKR'}</Text>
                 </Pressable>
               </View>
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
