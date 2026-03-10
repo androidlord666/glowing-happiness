@@ -398,6 +398,7 @@ export default function App() {
   const [skrUnstakeBusy, setSkrUnstakeBusy] = useState(false);
   const [skrWithdrawBusy, setSkrWithdrawBusy] = useState(false);
   const [skrNormalizeBusy, setSkrNormalizeBusy] = useState(false);
+  const [skrExtraAccountCount, setSkrExtraAccountCount] = useState(0);
   const [skrRefreshBusy, setSkrRefreshBusy] = useState(false);
   const [skrApyPct, setSkrApyPct] = useState<string>('—');
   const [skrSubmitLock, setSkrSubmitLock] = useState(false);
@@ -496,6 +497,10 @@ export default function App() {
     if (!Number.isFinite(parsedSkrBalance) || !Number.isFinite(parsedSkrAmount)) return '—';
     return (parsedSkrBalance + Math.max(0, parsedSkrAmount)).toFixed(4);
   }, [parsedSkrBalance, parsedSkrAmount]);
+  const showNormalizeSkr = useMemo(
+    () => !!wallet && skrExtraAccountCount > 0,
+    [wallet, skrExtraAccountCount]
+  );
 
   const connection = useMemo(() => createConnection(cluster), [cluster]);
 
@@ -860,6 +865,39 @@ export default function App() {
     }
   }, [wallet, stakedSkrBalance, skrDecimals, getChainNowSec]);
 
+  const refreshSkrAccountShape = useCallback(async (walletAddr?: string) => {
+    const active = walletAddr ?? wallet;
+    if (!active) {
+      setSkrExtraAccountCount(0);
+      return;
+    }
+    try {
+      const owner = asPublicKey(active);
+      const mint = asPublicKey(SKR_MINT);
+      const ownerAta = getAssociatedTokenAddressSync(mint, owner);
+      const primaryEndpoint = (connection as any).rpcEndpoint as string | undefined;
+      const candidateEndpoints = Array.from(new Set([primaryEndpoint, RPC_URLS[cluster], ...(RPC_FALLBACK_URLS[cluster] ?? [])].filter(Boolean))) as string[];
+      const results = await Promise.allSettled(
+        candidateEndpoints.map(async (endpoint) => {
+          const conn = endpoint === primaryEndpoint ? connection : new Connection(endpoint, 'confirmed');
+          const mintAccounts = await conn.getParsedTokenAccountsByOwner(owner, { mint }, 'confirmed');
+          return mintAccounts.value.filter((row) => {
+            const amountRaw = BigInt(String((row.account.data as any)?.parsed?.info?.tokenAmount?.amount ?? '0'));
+            return row.pubkey.toBase58() !== ownerAta.toBase58() && amountRaw > 0n;
+          }).length;
+        })
+      );
+      const counts = results
+        .filter((result): result is PromiseFulfilledResult<number> => result.status === 'fulfilled')
+        .map((result) => result.value);
+      if (counts.length) {
+        setSkrExtraAccountCount(Math.max(...counts));
+      }
+    } catch {
+      // keep last known count
+    }
+  }, [wallet, connection, cluster]);
+
   const onStakeSkr = async () => {
     if (skrStakeBusy || skrSubmitLock) return;
     setSkrSubmitLock(true);
@@ -1191,6 +1229,7 @@ export default function App() {
       setStatus(`Normalizing SKR accounts (${shortAddr(sig)})...`);
       await bestView.conn.confirmTransaction(sig, 'confirmed').catch(() => null);
       await refreshWalletBalances(wallet);
+      await refreshSkrAccountShape(wallet);
       suppressNextStatusModalRef.current = true;
       setStatus('SKR accounts normalized.');
     } catch (e: any) {
@@ -1353,18 +1392,20 @@ export default function App() {
       setSkrPendingUnstakeRaw('0');
       setSkrUnstakeUnlockAtSec(0);
       setSkrApyPct('—');
+      setSkrExtraAccountCount(0);
       return;
     }
     setSkrVaultAddress('stake.solanamobile.com');
     refreshWalletBalances(wallet).catch(() => {});
     refreshStakedSkrBalance().catch(() => {});
+    refreshSkrAccountShape(wallet).catch(() => {});
     fetchOfficialCurrentApy()
       .then((apy) => {
         if (apy == null || !Number.isFinite(apy)) return;
         setSkrApyPct((apy * 100).toFixed(2));
       })
       .catch(() => {});
-  }, [wallet, showSkrStaking, refreshStakedSkrBalance, refreshWalletBalances]);
+  }, [wallet, showSkrStaking, refreshStakedSkrBalance, refreshWalletBalances, refreshSkrAccountShape]);
 
   useEffect(() => {
     if (!wallet) return;
@@ -2764,6 +2805,7 @@ export default function App() {
             onPress={() => {
               setShowSettings(false);
               setShowSkrStaking(true);
+              refreshSkrAccountShape(wallet).catch(() => {});
             }}
             style={styles.seekerBtnTopRight}
           >
@@ -2834,6 +2876,7 @@ export default function App() {
                     try {
                       await refreshWalletBalances(wallet);
                       await refreshStakedSkrBalance();
+                      await refreshSkrAccountShape(wallet);
                       const apy = await fetchOfficialCurrentApy().catch(() => null);
                       if (apy != null && Number.isFinite(apy)) {
                         setSkrApyPct((apy * 100).toFixed(2));
@@ -2886,13 +2929,15 @@ export default function App() {
                 >
                   <Text style={styles.skrQuickBtnText}>Max</Text>
                 </Pressable>
-                <Pressable
-                  onPress={onNormalizeSkrAccounts}
-                  disabled={skrSubmitLock || skrNormalizeBusy}
-                  style={({ pressed }) => [styles.skrQuickBtn, (pressed || skrSubmitLock || skrNormalizeBusy) && styles.skrQuickBtnPressed]}
-                >
-                  <Text style={styles.skrQuickBtnText}>{skrNormalizeBusy ? 'Normalizing…' : 'Normalize SKR'}</Text>
-                </Pressable>
+                {showNormalizeSkr && (
+                  <Pressable
+                    onPress={onNormalizeSkrAccounts}
+                    disabled={skrSubmitLock || skrNormalizeBusy}
+                    style={({ pressed }) => [styles.skrQuickBtn, (pressed || skrSubmitLock || skrNormalizeBusy) && styles.skrQuickBtnPressed]}
+                  >
+                    <Text style={styles.skrQuickBtnText}>{skrNormalizeBusy ? 'Normalizing…' : 'Normalize SKR'}</Text>
+                  </Pressable>
+                )}
               </View>
               <Text style={styles.meta}>After stake: {skrBalanceAfterStake} SKR</Text>
               <Text style={styles.meta}>After unstake: {skrBalanceAfterUnstake} SKR</Text>
