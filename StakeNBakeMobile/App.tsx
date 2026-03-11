@@ -80,7 +80,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.51 (code 69)';
+const APP_VERSION_LABEL = 'v2.51 (code 70)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -2410,7 +2410,7 @@ export default function App() {
           <StatusBar barStyle={splashPhase === 0 ? 'dark-content' : 'light-content'} />
           <Animated.Image
             source={splashPhase === 0 ? lightSplashImage : darkSplashImage}
-            style={styles.splashLogo}
+            style={splashPhase === 0 ? styles.splashLogoLight : styles.splashLogoDark}
             resizeMode="contain"
           />
         </SafeAreaView>
@@ -2424,7 +2424,7 @@ export default function App() {
         <SafeAreaView style={[styles.root, styles.centered, styles.landingRootDark]}>
           <StatusBar barStyle={'light-content'} />
           <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
-            <Animated.Image source={darkSplashImage} style={styles.splashLogo} resizeMode="contain" />
+            <Animated.Image source={darkSplashImage} style={styles.splashLogoDark} resizeMode="contain" />
             <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
             <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
             <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
@@ -3238,7 +3238,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFD9D9',
     borderColor: '#FF9B9B',
   },
-  splashLogo: { width: SCREEN_WIDTH * 0.96, height: SCREEN_WIDTH * 1.44 },
+  splashLogoLight: { width: SCREEN_WIDTH * 0.96, height: SCREEN_WIDTH * 1.44 },
+  splashLogoDark: { width: SCREEN_WIDTH, height: SCREEN_WIDTH * 1.56 },
   splashWordmarkBox: {
     minWidth: 240,
     minHeight: 88,
@@ -3360,7 +3361,7 @@ const styles = StyleSheet.create({
   },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
   headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 0, marginBottom: 2, marginHorizontal: -20 },
-  headerLogo: { width: SCREEN_WIDTH + 40, height: 120 },
+  headerLogo: { width: SCREEN_WIDTH + 56, height: 136 },
   headerWordmark: {
     color: '#EAFDFF',
     fontSize: 24,
