@@ -56,6 +56,9 @@ import {
 } from './src/lib/consolidation';
 
 const walletAdapter = createWalletAdapter();
+const lightSplashImage = require('./branding/whitesplash.jpg');
+const darkSplashImage = require('./branding/blacksplash.png');
+const headerBrandImage = require('./branding/header.jpg');
 
 type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
@@ -75,7 +78,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.51 (code 65)';
+const APP_VERSION_LABEL = 'v2.51 (code 66)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -2403,11 +2406,11 @@ export default function App() {
       <SafeAreaProvider>
         <SafeAreaView style={[styles.root, styles.centered, splashPhase === 0 ? styles.splashRootLight : styles.splashRootDark]}>
           <StatusBar barStyle={splashPhase === 0 ? 'dark-content' : 'light-content'} />
-          <View style={styles.splashWordmarkBox}>
-            <Text style={[styles.splashWordmark, splashPhase === 0 && styles.splashWordmarkLight]}>
-              {splashPhase === 0 ? 'MST' : APP_NAME}
-            </Text>
-          </View>
+          <Animated.Image
+            source={splashPhase === 0 ? lightSplashImage : darkSplashImage}
+            style={styles.splashLogo}
+            resizeMode="contain"
+          />
         </SafeAreaView>
       </SafeAreaProvider>
     );
@@ -2419,9 +2422,7 @@ export default function App() {
         <SafeAreaView style={[styles.root, styles.centered, styles.landingRootDark]}>
           <StatusBar barStyle={'light-content'} />
           <Animated.View style={{ opacity: landingFade, transform: [{ translateY: landingFade.interpolate({ inputRange: [0, 1], outputRange: [8, 0] }) }] }}>
-            <View style={styles.splashWordmarkBox}>
-              <Text style={styles.splashWordmark}>{APP_NAME}</Text>
-            </View>
+            <Animated.Image source={darkSplashImage} style={styles.splashLogo} resizeMode="contain" />
             <Text style={[styles.title, styles.landingTitle]}>{APP_NAME}</Text>
             <Text style={[styles.meta, styles.landingNetworkMeta]}>Network: Mainnet</Text>
             <Text style={[styles.subtitle, styles.landingConnectHint]}>Connect wallet to continue.</Text>
@@ -2452,7 +2453,7 @@ export default function App() {
         }
       >
         <View style={styles.headerCenter}>
-          <Text style={[styles.headerWordmark, theme === 'light' && styles.headerWordmarkLight]}>{APP_NAME}</Text>
+          <Animated.Image source={headerBrandImage} style={styles.headerLogo} resizeMode="contain" />
         </View>
         <Text style={[styles.subtitle, { color: palette.primary }]}>Mainnet</Text>
         <Text style={[styles.rpcBadge, rpcHealth === 'degraded' && styles.rpcBadgeBad]}>
