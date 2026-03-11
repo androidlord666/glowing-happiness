@@ -1,6 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Buffer } from 'buffer';
 import {
+  Dimensions,
   Linking,
   ScrollView,
   StatusBar,
@@ -59,6 +60,7 @@ const walletAdapter = createWalletAdapter();
 const lightSplashImage = require('./branding/whitesplash.jpg');
 const darkSplashImage = require('./branding/blacksplash.png');
 const headerBrandImage = require('./branding/header.jpg');
+const SCREEN_WIDTH = Dimensions.get('window').width;
 
 type Mode = 'stake' | 'send' | 'receive' | 'swap';
 type Screen = 'splash' | 'landing' | 'app';
@@ -78,7 +80,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.51 (code 67)';
+const APP_VERSION_LABEL = 'v2.51 (code 68)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -3236,7 +3238,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFD9D9',
     borderColor: '#FF9B9B',
   },
-  splashLogo: { width: 320, height: 90 },
+  splashLogo: { width: SCREEN_WIDTH * 0.92, height: SCREEN_WIDTH * 0.58 },
   splashWordmarkBox: {
     minWidth: 240,
     minHeight: 88,
@@ -3357,8 +3359,8 @@ const styles = StyleSheet.create({
     color: '#072225',
   },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 8, marginBottom: 4 },
-  headerLogo: { width: 240, height: 40 },
+  headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 4, marginHorizontal: -20 },
+  headerLogo: { width: SCREEN_WIDTH, height: 78 },
   headerWordmark: {
     color: '#EAFDFF',
     fontSize: 24,
