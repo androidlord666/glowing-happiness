@@ -80,7 +80,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.51 (code 68)';
+const APP_VERSION_LABEL = 'v2.51 (code 69)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -3238,7 +3238,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#FFD9D9',
     borderColor: '#FF9B9B',
   },
-  splashLogo: { width: SCREEN_WIDTH * 0.92, height: SCREEN_WIDTH * 0.58 },
+  splashLogo: { width: SCREEN_WIDTH * 0.96, height: SCREEN_WIDTH * 1.44 },
   splashWordmarkBox: {
     minWidth: 240,
     minHeight: 88,
@@ -3261,7 +3261,7 @@ const styles = StyleSheet.create({
   splashWordmarkLight: {
     color: '#0A242A',
   },
-  splashRootLight: { backgroundColor: '#fff' },
+  splashRootLight: { backgroundColor: '#F3F0E8' },
   splashRootDark: { backgroundColor: '#000' },
   landingRootDark: { backgroundColor: '#000' },
   landingTitle: { color: '#fff' },
@@ -3359,8 +3359,8 @@ const styles = StyleSheet.create({
     color: '#072225',
   },
   rowBetween: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between', gap: 8 },
-  headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 4, marginBottom: 4, marginHorizontal: -20 },
-  headerLogo: { width: SCREEN_WIDTH, height: 78 },
+  headerCenter: { alignItems: 'center', justifyContent: 'center', marginTop: 0, marginBottom: 2, marginHorizontal: -20 },
+  headerLogo: { width: SCREEN_WIDTH + 40, height: 120 },
   headerWordmark: {
     color: '#EAFDFF',
     fontSize: 24,
