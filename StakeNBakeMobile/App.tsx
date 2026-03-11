@@ -80,7 +80,7 @@ type TxLifecycleEvent = {
   note?: string;
 };
 
-const APP_VERSION_LABEL = 'v2.51 (code 72)';
+const APP_VERSION_LABEL = 'v2.51 (code 73)';
 const MAX_SOURCE_ACCOUNTS = 99;
 
 // Feature flags (fast emergency toggles)
@@ -3238,7 +3238,7 @@ const styles = StyleSheet.create({
     borderColor: '#FF9B9B',
   },
   splashLogoLight: { width: SCREEN_WIDTH * 0.98, height: SCREEN_WIDTH * 1.5 },
-  splashLogoDark: { width: SCREEN_WIDTH * 0.92, height: SCREEN_WIDTH * 1.38 },
+  splashLogoDark: { width: SCREEN_WIDTH * 0.84, height: SCREEN_WIDTH * 1.26 },
   splashWordmarkBox: {
     minWidth: 240,
     minHeight: 88,
