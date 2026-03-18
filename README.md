@@ -1,4 +1,4 @@
-# Staking with Solana Mobile 
+# Mobile Staking Toolkit
 
 Solana Mobile dApp for consolidating stake accounts (up to 25 source stake accounts into 1 destination stake account), with a minimalist dark Solana-themed UI.
 
