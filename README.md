@@ -4,7 +4,7 @@ Solana Mobile dApp for consolidating stake accounts (up to 25 source stake accou
 
 ## Project layout
 
-- `Staking with Solana Mobile/` → React Native Android/iOS app (main app)
+- `Mobile Staking Toolkit/` → React Native Android/iOS app (main app)
 - root files are legacy scaffold notes from earlier MVP pass
 
 ## Current shipped features
